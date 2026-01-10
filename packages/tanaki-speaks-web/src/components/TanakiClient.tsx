@@ -156,49 +156,35 @@ function TanakiExperience() {
   }, []);
 
   // Process AI responses - FIXED: Only add responses that come AFTER our messages
-  useEffect(() => {
-    // Get all AI responses from events
-    const aiResponses = events
-      .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
-      .map(event => ({
-        id: event._id,
-        text: event.content,
-        timestamp: new Date(event._timestamp || Date.now()),
-        isAI: true
-      }));
+// Process AI responses - SIMPLIFIED VERSION
+useEffect(() => {
+  // Get all AI responses from events
+  const aiResponses = events
+    .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
+    .map(event => ({
+      id: event._id,
+      text: event.content,
+      timestamp: new Date(event._timestamp || Date.now()),
+      isAI: true
+    }));
 
-    if (aiResponses.length === 0) return;
+  if (aiResponses.length === 0) return;
 
-    // Filter out responses we've already processed
-    const newAIResponses = aiResponses.filter(response => 
-      !processedAIResponseIds.current.has(response.id)
-    );
-
-    if (newAIResponses.length === 0) return;
-
-    // If we're waiting for a response, add the most recent one
-    if (waitingForResponse.current && lastMessageSentTime.current) {
-      // Get the most recent AI response that came after our last message
-      const responsesAfterOurMessage = newAIResponses.filter(response => 
-        response.timestamp > lastMessageSentTime.current!
-      );
-
-      if (responsesAfterOurMessage.length > 0) {
-        // Take the first response that came after our message
-        const responseForUs = responsesAfterOurMessage[0];
-        
-        // Mark as processed
-        processedAIResponseIds.current.add(responseForUs.id);
-        
-        // Add to our messages
-        setUserMessages(prev => [...prev, responseForUs]);
-        
-        // We got our response, stop waiting
-        waitingForResponse.current = false;
-        lastMessageSentTime.current = null;
-      }
-    }
-  }, [events]);
+  // Get the most recent AI response
+  const mostRecentResponse = aiResponses[aiResponses.length - 1];
+  
+  // Only add if we haven't processed it yet
+  if (!processedAIResponseIds.current.has(mostRecentResponse.id)) {
+    processedAIResponseIds.current.add(mostRecentResponse.id);
+    
+    // Add to our messages
+    setUserMessages(prev => {
+      // Remove any existing AI messages to avoid duplicates
+      const filteredPrev = prev.filter(msg => !msg.isAI);
+      return [...filteredPrev, mostRecentResponse];
+    });
+  }
+}, [events]);
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !connected) return;
