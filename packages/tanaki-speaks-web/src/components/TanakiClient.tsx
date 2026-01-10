@@ -15,14 +15,6 @@ import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
 // Import icons
 import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
 
-// Add interface for chat messages
-interface ChatMessage {
-  id: string;
-  text: string;
-  timestamp: Date;
-  isAI: boolean;
-}
-
 function readBoolEnv(value: unknown, fallback: boolean): boolean {
   if (typeof value !== "string") return fallback;
   if (value === "true") return true;
@@ -69,17 +61,27 @@ function TanakiExperience() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [userMessages, setUserMessages] = useState<{id: string, text: string, timestamp: Date, isAI: boolean}[]>([]);
+
+  // Track events that happened BEFORE this session started
+  const componentMountedRef = useRef(false);
+  const initialEventsProcessedRef = useRef(false);
   
-  // Chat messages - ONLY for this user
-  const [userMessages, setUserMessages] = useState<ChatMessage[]>([]);
-  
-  // Track which AI responses we've already seen
-  const seenAIResponseIds = useRef<Set<string>>(new Set());
+  // Track the timestamp when component mounted
+  const sessionStartTimeRef = useRef<Date>(new Date());
 
   const unlockOnce = useCallback(() => {
     if (unlockedOnceRef.current) return;
     unlockedOnceRef.current = true;
     void audioRef.current?.unlock();
+  }, []);
+
+  // Mark component as mounted
+  useEffect(() => {
+    componentMountedRef.current = true;
+    return () => {
+      componentMountedRef.current = false;
+    };
   }, []);
 
   // When Tanaki says something new, update aria-live text
@@ -161,14 +163,22 @@ function TanakiExperience() {
     };
   }, []);
 
-  // FIXED: Track only AI responses that happen AFTER our messages
-  const lastUserMessageTime = useRef<Date | null>(null);
-  
-  // Track AI responses that come after our messages
+  // Process NEW AI responses that happen AFTER this session started
   useEffect(() => {
-    // Get all AI responses from events
-    const aiResponses = events
-      .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
+    // Skip processing if we haven't marked component as mounted yet
+    if (!componentMountedRef.current || !initialEventsProcessedRef.current) return;
+
+    const newAIResponses = events
+      .filter(e => {
+        // Only process events that happened AFTER our session started
+        const eventTime = e._timestamp ? new Date(e._timestamp) : new Date();
+        return (
+          e._kind === "interactionRequest" && 
+          e.action === "says" && 
+          e.content &&
+          eventTime >= sessionStartTimeRef.current
+        );
+      })
       .map(event => ({
         id: event._id,
         text: event.content,
@@ -176,41 +186,39 @@ function TanakiExperience() {
         isAI: true
       }));
 
-    if (aiResponses.length === 0) return;
-
-    // Find new AI responses we haven't seen yet
-    const newAIResponses = aiResponses.filter(response => 
-      !seenAIResponseIds.current.has(response.id)
-    );
-
     if (newAIResponses.length === 0) return;
 
-    // Add only the most recent AI response (assuming it's for us)
-    // This is a simple heuristic - in a real app, you'd need proper session tracking
-    const mostRecentAIResponse = newAIResponses.sort((a, b) => 
-      b.timestamp.getTime() - a.timestamp.getTime()
-    )[0];
-
-    // Mark this response as seen
-    seenAIResponseIds.current.add(mostRecentAIResponse.id);
-    
-    // Add to our messages
-    setUserMessages(prev => [...prev, mostRecentAIResponse]);
+    // Add new AI responses to userMessages
+    setUserMessages(prev => {
+      const existingIds = new Set(prev.map(msg => msg.id));
+      const messagesToAdd = newAIResponses.filter(msg => !existingIds.has(msg.id));
+      
+      if (messagesToAdd.length === 0) return prev;
+      
+      return [...prev, ...messagesToAdd];
+    });
   }, [events]);
+
+  // Mark initial events as processed after first render
+  useEffect(() => {
+    // Give a small delay to ensure component is mounted
+    const timer = setTimeout(() => {
+      initialEventsProcessedRef.current = true;
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !connected) return;
     
     // Add user message to UI
-    const userMessage: ChatMessage = {
+    const userMessage = {
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       text: text,
       timestamp: new Date(),
       isAI: false
     };
-    
-    // Track when we sent this message
-    lastUserMessageTime.current = new Date();
     
     setUserMessages(prev => [...prev, userMessage]);
     unlockOnce();
@@ -225,8 +233,6 @@ function TanakiExperience() {
   const clearChat = () => {
     if (confirm("Clear your chat history?")) {
       setUserMessages([]);
-      seenAIResponseIds.current.clear();
-      lastUserMessageTime.current = null;
     }
   };
 
@@ -411,7 +417,7 @@ function TanakiExperience() {
           </div>
         </div>
 
-        {/* Chat Interface - FIXED: Show ONLY userMessages (not events) */}
+        {/* Chat Interface - Show ONLY userMessages */}
         <div
           ref={overlayRef}
           className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat custom-scrollbar"
@@ -431,7 +437,7 @@ function TanakiExperience() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
-            {/* FIXED: Only show userMessages array, NOT events array */}
+            {/* Show ONLY userMessages (which contains only messages from this session) */}
             {userMessages.length > 0 ? (
               userMessages
                 .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
