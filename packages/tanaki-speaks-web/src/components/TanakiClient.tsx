@@ -15,46 +15,6 @@ import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
 // Import icons
 import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
 
-// Add this interface for typed messages
-interface ChatMessage {
-  id: string;
-  text: string;
-  timestamp: Date;
-  isAI: boolean;
-  userId?: string; // Add user ID to separate users
-  userName?: string; // Add username for display
-}
-
-// User session management
-const generateUserId = () => {
-  // Generate a unique user ID for this tab/session
-  if (typeof window !== 'undefined') {
-    let userId = localStorage.getItem('meilin_user_id');
-    if (!userId) {
-      userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      localStorage.setItem('meilin_user_id', userId);
-    }
-    return userId;
-  }
-  return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
-
-const getUserName = () => {
-  if (typeof window !== 'undefined') {
-    let userName = localStorage.getItem('meilin_user_name');
-    if (!userName) {
-      const adjectives = ['Quantum', 'Neural', 'Cyber', 'Digital', 'Virtual', 'AI', 'Synth'];
-      const nouns = ['Explorer', 'Traveler', 'Pioneer', 'Navigator', 'Voyager', 'Seeker'];
-      const randomAdj = adjectives[Math.floor(Math.random() * adjectives.length)];
-      const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
-      userName = `${randomAdj} ${randomNoun}`;
-      localStorage.setItem('meilin_user_name', userName);
-    }
-    return userName;
-  }
-  return 'Anonymous User';
-};
-
 function readBoolEnv(value: unknown, fallback: boolean): boolean {
   if (typeof value !== "string") return fallback;
   if (value === "true") return true;
@@ -99,32 +59,11 @@ function TanakiExperience() {
   const [overlayHeight, setOverlayHeight] = useState(240);
   const [liveText, setLiveText] = useState("");
 
-  // User identification
-  const [userId] = useState(() => generateUserId());
-  const [userName] = useState(() => getUserName());
-
   // UI state for your design
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [userMessages, setUserMessages] = useState<ChatMessage[]>(() => {
-    // Load only this user's messages from sessionStorage
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem(`meilin_messages_${userId}`);
-      return saved ? JSON.parse(saved).map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp)
-      })) : [];
-    }
-    return [];
-  });
-
-  // Save messages to sessionStorage when they change
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(`meilin_messages_${userId}`, JSON.stringify(userMessages));
-    }
-  }, [userMessages, userId]);
+  const [userMessages, setUserMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
 
   const unlockOnce = useCallback(() => {
     if (unlockedOnceRef.current) return;
@@ -212,58 +151,25 @@ function TanakiExperience() {
     };
   }, []);
 
-  // Simple send function - FIXED with user identification
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim() || !connected) return;
-    
-    // Add user message to UI immediately with user identification
-    const userMessage: ChatMessage = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      text: text,
-      timestamp: new Date(),
-      isAI: false,
-      userId: userId,
-      userName: userName
-    };
-    
-    setUserMessages(prev => [...prev, userMessage]);
-    unlockOnce();
-    await send(text);
+  // Simple send function - EXACT from working code
+const handleSendMessage = async (text: string) => {
+  if (!text.trim() || !connected) return;
+  
+  // Add user message to UI immediately
+  const userMessage = {
+    id: `user_${Date.now()}`,
+    text: text,
+    timestamp: new Date()
   };
+  setUserMessages(prev => [...prev, userMessage]);
+  
+  unlockOnce();
+  await send(text);
+};
 
-  // Process AI responses with proper user context
-  useEffect(() => {
-    const aiMessages = events
-      .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
-      .map(event => ({
-        id: event._id,
-        text: event.content,
-        timestamp: new Date(event._timestamp || Date.now()),
-        isAI: true,
-        userId: "ai",
-        userName: "MEILIN"
-      }));
-
-    // Only add new AI messages that aren't already in our messages
-    aiMessages.forEach(aiMsg => {
-      if (!userMessages.some(msg => msg.id === aiMsg.id)) {
-        setUserMessages(prev => [...prev, aiMsg]);
-      }
-    });
-  }, [events, userMessages]);
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
-  };
-
-  // Clear chat history for this user
-  const clearChat = () => {
-    if (confirm("Clear your chat history?")) {
-      setUserMessages([]);
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem(`meilin_messages_${userId}`);
-      }
-    }
   };
 
   // Model loading
@@ -278,11 +184,6 @@ function TanakiExperience() {
   ];
 
   const mobileMenuItems = ["Dashboard", "Community", "Models", "Features", "Settings"];
-
-  // Filter messages to show only relevant ones (current user's + AI responses)
-  const displayMessages = userMessages.filter(msg => 
-    msg.isAI || msg.userId === userId
-  );
 
   return (
     <div
@@ -351,14 +252,6 @@ function TanakiExperience() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* User Info */}
-              <div className="hidden md:flex items-center gap-2 bg-cyan-500/10 px-3 py-2 rounded-xl border border-cyan-500/30">
-                <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
-                <span className="text-cyan-300 text-sm font-medium" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
-                  {userName}
-                </span>
-              </div>
-
               {/* Social Links */}
               <div className="hidden md:flex items-center gap-3">
                 <a
@@ -390,9 +283,6 @@ function TanakiExperience() {
                     flex-col bg-gray-900/10 border border-cyan-500/20 p-4 rounded-2xl right-0 top-full w-64 
                     transition-all duration-300 shadow-2xl z-20`}
                 >
-                  <div className="mb-2 p-2 bg-cyan-500/10 rounded-lg text-center">
-                    <span className="text-cyan-300 text-sm font-medium">{userName}</span>
-                  </div>
                   {mobileMenuItems.map((item) => (
                     <a
                       key={item}
@@ -439,93 +329,97 @@ function TanakiExperience() {
                 {connectedUsers} {connectedUsers === 1 ? "user" : "users"} online
               </span>
               <div className="w-px h-4 bg-cyan-500/40"></div>
-              <button
-                onClick={clearChat}
-                className="text-cyan-200/80 hover:text-cyan-100 text-xs font-medium transition-colors"
-                title="Clear chat history"
-              >
-                🗑️ Clear
-              </button>
+              <span className="text-cyan-200/80 text-xs font-medium">
+                {connected ? "🟢 Connected" : "🔴 Disconnected"}
+              </span>
             </div>
           </div>
         </div>
 
         {/* Chat Interface */}
-        <div
-          ref={overlayRef}
-          className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat custom-scrollbar"
-          style={{ pointerEvents: "auto" as const }}
-        >
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 shadow-inner">
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
-              <span className="text-cyan-300 font-bold text-lg tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-                NEURAL_CHAT
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
-            </div>
+ <div
+        ref={overlayRef}
+        className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat"
+        style={{ pointerEvents: "auto" as const }}
+      >
+        <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 shadow-inner">
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
+            <span className="text-cyan-300 font-bold text-lg tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+              NEURAL_CHAT
+            </span>
           </div>
-
-          <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
-            {displayMessages
-              .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-              .slice(-10) // Show last 10 messages
-              .map((msg) => (
-                <div 
-                  key={msg.id}
-                  className={`mb-3 p-3 rounded-xl ${
-                    msg.isAI 
-                      ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
-                      : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className={`w-2 h-2 rounded-full ${
-                      msg.isAI ? "bg-purple-400" : "bg-cyan-400"
-                    }`}></div>
-                    <strong className={`text-sm ${
-                      msg.isAI ? "text-purple-300" : "text-cyan-300"
-                    }`}>
-                      {msg.isAI ? "MEILIN" : (msg.userName || "YOU")}
-                    </strong>
-                    {!msg.isAI && (
-                      <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
-                        <span className="text-xs text-cyan-300 font-medium">YOU</span>
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
-                      </div>
-                    )}
-                  </div>
-                  <div className={`text-sm ${
-                    msg.isAI ? "text-purple-100" : "text-cyan-100"
-                  }`}>
-                    {msg.text}
-                  </div>
-                </div>
-              ))}
-            
-            {displayMessages.length === 0 && (
-              <div className="text-center py-8 text-cyan-300/50">
-                <div className="text-lg mb-2">Start a conversation with MEILIN</div>
-                <div className="text-sm">Ask anything and get AI-powered responses</div>
-              </div>
-            )}
-          </div>
-
-          {/* Chat Input */}
-          <div className="mt-4">
-            <ChatInput
-              disabled={!connected}
-              onUserGesture={unlockOnce}
-              isRecording={isRecording}
-              onVoiceClick={() => setIsRecording(!isRecording)}
-              onSend={handleSendMessage}
-              placeholder="Type your message..."
-            />
+          <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
           </div>
         </div>
+
+        <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
+          {[...userMessages, ...events
+            .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
+            .map(event => ({
+              id: event._id,
+              text: event.content,
+              timestamp: new Date(event._timestamp || Date.now()),
+              isAI: true
+            }))]
+            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+            .slice(-10) // Show last 10 messages total
+            .map((msg) => (
+              <div 
+                key={msg.id}
+                className={`mb-3 p-3 rounded-xl ${
+                  msg.isAI 
+                    ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
+                    : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <div className={`w-2 h-2 rounded-full ${
+                    msg.isAI ? "bg-purple-400" : "bg-cyan-400"
+                  }`}></div>
+                  <strong className={`text-sm ${
+                    msg.isAI ? "text-purple-300" : "text-cyan-300"
+                  }`}>
+                    {msg.isAI ? "MEILIN" : "YOU"}
+                  </strong>
+                  {!msg.isAI && (
+                    <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
+                      <span className="text-xs text-cyan-300 font-medium">LIVE</span>
+                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                    </div>
+                  )}
+                </div>
+                <div className={`text-sm ${
+                  msg.isAI ? "text-purple-100" : "text-cyan-100"
+                }`}>
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+          
+          {userMessages.length === 0 && 
+           events.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
+            <div className="text-center py-8 text-cyan-300/50">
+              <div className="text-lg mb-2">Start a conversation with MEILIN</div>
+              <div className="text-sm">Ask anything and get AI-powered responses</div>
+            </div>
+          )}
+        </div>
+
+        {/* Chat Input */}
+        <div className="mt-4">
+          <ChatInput
+            disabled={!connected}
+            onUserGesture={unlockOnce}
+            isRecording={isRecording}
+            onVoiceClick={() => setIsRecording(!isRecording)}
+            onSend={handleSendMessage} // Use the updated function
+            placeholder="Type your message..."
+          />
+        </div>
+      </div>
 
         {/* Mute Button */}
         <button
@@ -551,6 +445,24 @@ function TanakiExperience() {
               border-radius: 20px !important;
             }
           }
+          
+          ::-webkit-scrollbar {
+            width: 6px;
+          }
+          
+          ::-webkit-scrollbar-track {
+            background: rgba(6, 182, 212, 0.1);
+            border-radius: 10px;
+          }
+          
+          ::-webkit-scrollbar-thumb {
+            background: rgba(6, 182, 212, 0.4);
+            border-radius: 10px;
+          }
+          
+          ::-webkit-scrollbar-thumb:hover {
+            background: rgba(6, 182, 212, 0.6);
+          }
         `}</style>
 
         <style jsx global>{`
@@ -558,52 +470,6 @@ function TanakiExperience() {
           
           .hover\\:drop-shadow-glow:hover {
             filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.6));
-          }
-          
-          /* Custom Thin Scrollbar with bg-cyan-400 */
-          .custom-scrollbar::-webkit-scrollbar {
-            width: 3px; /* Reduced from 3px to 1px */
-          }
-          
-          .custom-scrollbar::-webkit-scrollbar-track {
-            background: rgba(6, 182, 212, 0.1);
-            border-radius: 10px;
-          }
-          
-          .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: rgb(34, 211, 238); /* bg-cyan-400 */
-            border-radius: 10px;
-          }
-          
-          .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: rgb(22, 196, 223); /* Slightly darker cyan on hover */
-          }
-          
-          /* For Firefox */
-          .custom-scrollbar {
-            scrollbar-width: thin;
-            scrollbar-color: rgb(34, 211, 238) rgba(6, 182, 212, 0.1);
-          }
-          
-          /* Apply to chat message container specifically */
-          .custom-scrollbar > div:first-of-type + div {
-            /* This targets the chat message container */
-            scrollbar-width: thin;
-            scrollbar-color: rgb(34, 211, 238) rgba(6, 182, 212, 0.1);
-          }
-          
-          .custom-scrollbar > div:first-of-type + div::-webkit-scrollbar {
-            width: 3px;
-          }
-          
-          .custom-scrollbar > div:first-of-type + div::-webkit-scrollbar-track {
-            background: rgba(6, 182, 212, 0.1);
-            border-radius: 10px;
-          }
-          
-          .custom-scrollbar > div:first-of-type + div::-webkit-scrollbar-thumb {
-            background: rgb(34, 211, 238);
-            border-radius: 10px;
           }
         `}</style>
       </div>
