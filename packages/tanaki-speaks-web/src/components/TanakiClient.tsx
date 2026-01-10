@@ -17,21 +17,14 @@ import { Cpu, Home, Menu, Settings, Sparkles, Users, Zap } from "lucide-react";
 
 // Type definitions
 interface Message {
-  id: string; // ADDED: Unique ID for each message
+  id: string;
   text: string;
   user: {
     id: string;
     name: string;
   };
   timestamp: Date;
-  isPending?: boolean; // ADDED: For thinking/loading state
-}
-
-interface SoulEvent {
-  _id: string;
-  _kind: string;
-  action: string;
-  content: string;
+  isPending?: boolean;
 }
 
 interface AvatarMessage {
@@ -56,6 +49,7 @@ export default function TanakiClient() {
   const organization = "local";
   const local = readBoolEnv(import.meta.env.VITE_SOUL_ENGINE_LOCAL, false);
 
+  // EXACT WebSocket URL from working code
   const getWebSocketUrl =
     typeof window === "undefined"
       ? undefined
@@ -81,27 +75,30 @@ export default function TanakiClient() {
 /* -------------------------------------------------- */
 
 function TanakiExperience() {
-  const { connected, events, send, soul, connectedUsers } = useTanakiSoul();
-
-  // Audio handling
+  // EXACTLY same destructuring as working code
+  const { connected, events, send, connectedUsers, soul } = useTanakiSoul();
+  
+  // Audio handling (same as working code)
   const audioRef = useRef<TanakiAudioHandle | null>(null);
-  const unlockedOnceRef = useRef(false);
   const lastSpokenIdRef = useRef<string | null>(null);
   const activeTtsStreamIdRef = useRef<string | null>(null);
-  const pendingResponseRef = useRef<Message | null>(null); // Track pending AI response
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   
   // UI state
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const [blend, setBlend] = useState(0);
+  const unlockedOnceRef = useRef(false);
+  const [overlayHeight, setOverlayHeight] = useState(240);
+  const [liveText, setLiveText] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [error, setError] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [liveText, setLiveText] = useState("");
-  const [currentMessage, setCurrentMessage] = useState<AvatarMessage | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [mouthOpen, setMouthOpen] = useState(0);
-  const [overlayHeight, setOverlayHeight] = useState(220);
-  const [isThinking, setIsThinking] = useState(false); // Track thinking state
+  const [error, setError] = useState("");
+  
+  // Chat UI state (NEW - for your chat interface)
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [currentMessage, setCurrentMessage] = useState<AvatarMessage | null>(null);
+  const [isThinking, setIsThinking] = useState(false);
+  const pendingResponseRef = useRef<Message | null>(null);
 
   const USER_ID = useMemo(() => "user_" + Math.random().toString(36).substr(2, 9), []);
 
@@ -111,77 +108,51 @@ function TanakiExperience() {
     void audioRef.current?.unlock();
   }, []);
 
-  // Extract message from events - COMPLETELY REWORKED
+  // 1. EXACT event handling from working code (with chat UI addition)
   useEffect(() => {
-    // Log events for debugging
-    if (events.length > 0) {
-      console.log("All events:", events);
-      console.log("Latest event:", events[events.length - 1]);
-    }
-
-    // Look for different types of events
-    const latestSays = [...events]
+    const latest = [...events]
       .reverse()
-      .find((e: any) => {
-        // Check multiple possible formats
-        return (
-          (e._kind === "interactionRequest" && e.action === "says") ||
-          (e._kind === "says") ||
-          (e.action === "says")
-        );
-      });
-
-    if (!latestSays) {
-      // Check if there are thinking events
-      const thinkingEvent = events.find((e: any) => 
-        e._kind === "thinking" || e.content?.toLowerCase().includes("thinking")
-      );
-      if (thinkingEvent) {
-        setIsThinking(true);
+      .find((e) => e._kind === "interactionRequest" && e.action === "says");
+    
+    if (!latest) return;
+    if (lastSpokenIdRef.current === latest._id) return;
+    
+    lastSpokenIdRef.current = latest._id;
+    setLiveText(latest.content);
+    
+    // ADDED: Update chat UI with AI response
+    if (latest.content) {
+      // Remove pending message if exists
+      if (pendingResponseRef.current) {
+        setMessages(prev => prev.filter(msg => msg.id !== pendingResponseRef.current?.id));
+        pendingResponseRef.current = null;
       }
-      return;
-    }
-
-    // If we already processed this response, skip
-    if (lastSpokenIdRef.current === latestSays._id) return;
-
-    lastSpokenIdRef.current = latestSays._id;
-    const responseContent = latestSays.content || latestSays.text || "";
-    
-    if (!responseContent.trim()) {
-      console.warn("Empty response content:", latestSays);
-      return;
-    }
-
-    setLiveText(responseContent);
-    setIsThinking(false); // Stop thinking when response arrives
-    
-    // Remove pending response if exists
-    setMessages(prev => {
-      // Filter out any pending AI messages
-      const filtered = prev.filter(msg => !msg.isPending);
       
-      // Add the actual AI response
-      return [...filtered, {
+      // Add AI response to chat
+      const aiMessage: Message = {
         id: `ai_${Date.now()}`,
-        text: responseContent,
-        user: { id: "MEILIN_AI", name: "MEILIN" },
+        text: latest.content,
+        user: { id: "MEILIN", name: "MEILIN" },
         timestamp: new Date()
-      }];
-    });
+      };
+      
+      setMessages(prev => {
+        const exists = prev.some(msg => msg.id === aiMessage.id || msg.text === aiMessage.text);
+        return exists ? prev : [...prev, aiMessage];
+      });
+      
+      // Set for 3D avatar
+      setCurrentMessage({
+        content: latest.content,
+        animation: "Action",
+      });
+    }
     
-    // Create message object for avatar
-    const newMessage: AvatarMessage = {
-      content: responseContent,
-      animation: "Action",
-    };
+    setIsThinking(false);
     
-    setCurrentMessage(newMessage);
-    pendingResponseRef.current = null;
-    
-  }, [events]);
+  }, [events.length, events[events.length - 1]?.content]);
 
-  // TTS audio stream handling
+  // 2. EXACT TTS handling from working code
   useEffect(() => {
     const onChunk = (evt: any) => {
       const data = evt?.data as any;
@@ -208,7 +179,6 @@ function TanakiExperience() {
       const data = evt?.data as any;
       const streamId = typeof data?.streamId === "string" ? data.streamId : null;
       if (!streamId) return;
-      
       if (activeTtsStreamIdRef.current === streamId) {
         activeTtsStreamIdRef.current = null;
         setCurrentMessage(null);
@@ -221,7 +191,7 @@ function TanakiExperience() {
       console.error("TTS error event:", message, evt);
       setError("Audio playback failed. Please try again.");
       
-      // Remove pending response on error
+      // Cleanup pending message on error
       if (pendingResponseRef.current) {
         setMessages(prev => prev.filter(msg => msg.id !== pendingResponseRef.current?.id));
         pendingResponseRef.current = null;
@@ -232,7 +202,7 @@ function TanakiExperience() {
     soul.on("ephemeral:audio-chunk", onChunk);
     soul.on("ephemeral:audio-complete", onComplete);
     soul.on("ephemeral:audio-error", onError);
-
+    
     return () => {
       soul.off("ephemeral:audio-chunk", onChunk);
       soul.off("ephemeral:audio-complete", onComplete);
@@ -240,7 +210,7 @@ function TanakiExperience() {
     };
   }, [soul]);
 
-  // Overlay height for bubbles
+  // 3. EXACT overlay height measurement from working code
   useEffect(() => {
     const el = overlayRef.current;
     if (!el) return;
@@ -261,16 +231,14 @@ function TanakiExperience() {
     };
   }, []);
 
-  const handleMessagePlayed = () => {
-    setCurrentMessage(null);
-  };
-
+  // Handle sending message
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !connected) return;
     
     try {
       setError("");
       unlockOnce();
+      setIsThinking(true);
       
       // Add user message to chat
       const userMessage: Message = {
@@ -280,24 +248,23 @@ function TanakiExperience() {
         timestamp: new Date()
       };
       
-      // Add AI pending/thinking message
-      const pendingMessage: Message = {
-        id: `pending_${Date.now()}`,
-        text: "Thinking...",
-        user: { id: "MEILIN_AI", name: "MEILIN" },
+      // Add thinking message
+      const thinkingMessage: Message = {
+        id: `thinking_${Date.now()}`,
+        text: "MEILIN is thinking...",
+        user: { id: "MEILIN", name: "MEILIN" },
         timestamp: new Date(),
         isPending: true
       };
       
-      pendingResponseRef.current = pendingMessage;
-      setIsThinking(true);
+      pendingResponseRef.current = thinkingMessage;
       
-      setMessages(prev => [...prev, userMessage, pendingMessage]);
+      setMessages(prev => [...prev, userMessage, thinkingMessage]);
       
-      // Send to AI
+      // Send to AI (EXACT same as working code)
       await send(text);
       
-      // Set timeout to clear pending message if no response
+      // Timeout to remove thinking message if no response
       setTimeout(() => {
         if (pendingResponseRef.current) {
           setMessages(prev => prev.filter(msg => msg.id !== pendingResponseRef.current?.id));
@@ -305,19 +272,23 @@ function TanakiExperience() {
           setIsThinking(false);
           setError("No response received. Please try again.");
         }
-      }, 30000); // 30 second timeout
+      }, 30000);
       
     } catch (err) {
       console.error("Failed to send message:", err);
       setError("Failed to send message. Please try again.");
       
-      // Remove pending message on error
+      // Cleanup on error
       if (pendingResponseRef.current) {
         setMessages(prev => prev.filter(msg => msg.id !== pendingResponseRef.current?.id));
         pendingResponseRef.current = null;
       }
       setIsThinking(false);
     }
+  };
+
+  const handleMessagePlayed = () => {
+    setCurrentMessage(null);
   };
 
   const toggleMute = () => {
@@ -340,8 +311,12 @@ function TanakiExperience() {
   return (
     <div
       style={{ height: "100dvh", width: "100%", position: "relative" }}
-      onPointerDownCapture={unlockOnce}
-      onTouchStartCapture={unlockOnce}
+      onPointerDownCapture={() => {
+        unlockOnce();
+      }}
+      onTouchStartCapture={() => {
+        unlockOnce();
+      }}
     >
       {/* 3D Model Loading Overlay */}
       <ModelLoadingOverlay active={active} progress={progress} />
@@ -357,9 +332,8 @@ function TanakiExperience() {
       <TanakiAudio
         ref={audioRef}
         enabled={!isMuted}
-        onVolumeChange={(volume: number) => {
-          const v = Math.min(1, volume * 1.6);
-          setMouthOpen((p) => p * 0.6 + v * 0.4);
+        onVolumeChange={(volume) => {
+          setBlend((prev) => prev * 0.5 + volume * 0.5);
         }}
       />
 
@@ -373,7 +347,100 @@ function TanakiExperience() {
             className="flex flex-row md:flex-row gap-4 px-5 py-3 items-center justify-between md:items-start pointer-events-auto rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-gray-900/10 to-cyan-900/10 shadow-2xl"
             style={{ pointerEvents: "auto" as const }}
           >
-            {/* ... navigation remains same ... */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
+                <a
+                  href="/"
+                  className="text-cyan-300 font-bold text-xl hover:text-cyan-100 transition-all duration-300 hover:drop-shadow-glow"
+                  style={{ fontFamily: "'Orbitron', sans-serif", letterSpacing: "0.1em" }}
+                >
+                  MEILIN.AI
+                </a>
+              </div>
+              
+              <div className="hidden md:flex items-center gap-1 ml-6">
+                {menuItems.map((item, index) => (
+                  <a
+                    key={index}
+                    href="#"
+                    className="flex items-center gap-2 text-cyan-200/80 hover:text-cyan-100 px-4 py-2 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 border border-transparent hover:border-cyan-500/30 group"
+                  >
+                    <item.icon size={16} className="group-hover:scale-110 transition-transform" />
+                    <span className="font-medium text-sm" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+                      {item.label}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="hidden md:flex items-center gap-6">
+               
+               
+              </div>
+
+              {/* Social Links */}
+              <div className="hidden md:flex items-center gap-3">
+                <a
+                  href="#"
+                  className="px-4 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 text-sm font-medium"
+                  style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                >
+                  TWITTER
+                </a>
+                <a
+                  href="#"
+                  className="px-4 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-purple-100 transition-all duration-300 text-sm font-medium"
+                  style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                >
+                  GITHUB
+                </a>
+              </div>
+
+              <div className="md:hidden relative">
+                <button
+                  onClick={() => setIsMenuOpen(!isMenuOpen)}
+                  className="p-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25"
+                >
+                  <Menu size={20} />
+                </button>
+
+                <div
+                  className={`absolute ${isMenuOpen ? "flex opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"} 
+                    flex-col bg-gray-900/10 border border-cyan-500/20 p-4 rounded-2xl right-0 top-full w-64 
+                    transition-all duration-300 shadow-2xl z-20`}
+                >
+                  {mobileMenuItems.map((item) => (
+                    <a
+                      key={item}
+                      href="#"
+                      className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium"
+                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                    >
+                      {item}
+                    </a>
+                  ))}
+                  <div className="border-t border-cyan-500/20 pt-3 mt-2">
+                    <a
+                      href="#"
+                      className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium block"
+                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                    >
+                      TWITTER
+                    </a>
+                    <a
+                      href="#"
+                      className="text-purple-200 hover:text-purple-100 p-3 rounded-lg hover:bg-purple-500/10 transition-all duration-200 text-center font-medium block"
+                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                    >
+                      GITHUB
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
           </nav>
 
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'end', marginTop: '25px', marginRight: "20px" }}>
@@ -417,74 +484,82 @@ function TanakiExperience() {
                 {error}
               </div>
             )}
-            {messages.map((msg) => (
-              <div 
-                key={msg.id}
-                className={`mb-4 p-4 rounded-2xl border transition-all duration-300 ${
-                  msg.user?.id === USER_ID 
-                    ? "bg-cyan-500/10 border-cyan-500/30 ml-8" 
-                    : msg.isPending
-                    ? "bg-cyan-500/5 border-cyan-500/10 animate-pulse"
-                    : "bg-purple-500/10 border-purple-500/30 mr-8"
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-2 h-2 rounded-full ${
-                    msg.user?.id === USER_ID 
-                      ? "bg-cyan-400" 
-                      : msg.isPending 
-                      ? "bg-cyan-400 animate-pulse" 
-                      : "bg-purple-400"
-                  }`}></div>
-                  <strong className={`text-sm font-bold ${
-                    msg.user?.id === USER_ID 
-                      ? "text-cyan-300" 
-                      : msg.isPending 
-                      ? "text-cyan-300/60" 
-                      : "text-purple-300"
-                  }`}>
-                    {msg.user?.name || msg.user?.id}
-                  </strong>
-                  {msg.user?.id === USER_ID && (
-                    <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
-                      <span className="text-xs text-cyan-300 font-medium">LIVE</span>
-                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
-                    </div>
-                  )}
-                  {msg.isPending && (
-                    <div className="flex items-center gap-1 bg-cyan-500/10 px-2 py-1 rounded-full">
-                      <div className="flex space-x-1">
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce"></div>
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce delay-150"></div>
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce delay-300"></div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className={`text-sm leading-relaxed ${
-                  msg.user?.id === USER_ID 
-                    ? "text-cyan-100" 
-                    : msg.isPending 
-                    ? "text-cyan-300/60 italic" 
-                    : "text-purple-100"
-                }`}>
-                  {msg.text}
-                </div>
-                {!msg.isPending && (
-                  <div className={`text-xs mt-2 ${
-                    msg.user?.id === USER_ID ? "text-cyan-400/60" : "text-purple-400/60"
-                  }`}>
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                )}
+            
+            {messages.length === 0 ? (
+              <div className="text-center py-8 text-cyan-300/50">
+                <div className="text-lg mb-2">Start a conversation with MEILIN</div>
+                <div className="text-sm">Ask anything and get AI-powered responses</div>
               </div>
-            ))}
+            ) : (
+              messages.map((msg) => (
+                <div 
+                  key={msg.id}
+                  className={`mb-4 p-4 rounded-2xl border transition-all duration-300 ${
+                    msg.user?.id === USER_ID 
+                      ? "bg-cyan-500/10 border-cyan-500/30 ml-8" 
+                      : msg.isPending
+                      ? "bg-cyan-500/5 border-cyan-500/10 animate-pulse"
+                      : "bg-purple-500/10 border-purple-500/30 mr-8"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      msg.user?.id === USER_ID 
+                        ? "bg-cyan-400" 
+                        : msg.isPending 
+                        ? "bg-cyan-400 animate-pulse" 
+                        : "bg-purple-400"
+                    }`}></div>
+                    <strong className={`text-sm font-bold ${
+                      msg.user?.id === USER_ID 
+                        ? "text-cyan-300" 
+                        : msg.isPending 
+                        ? "text-cyan-300/60" 
+                        : "text-purple-300"
+                    }`}>
+                      {msg.user?.name || msg.user?.id}
+                    </strong>
+                    {msg.user?.id === USER_ID && (
+                      <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
+                        <span className="text-xs text-cyan-300 font-medium">LIVE</span>
+                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                      </div>
+                    )}
+                    {msg.isPending && (
+                      <div className="flex items-center gap-1 bg-cyan-500/10 px-2 py-1 rounded-full">
+                        <div className="flex space-x-1">
+                          <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce"></div>
+                          <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce delay-150"></div>
+                          <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce delay-300"></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className={`text-sm leading-relaxed ${
+                    msg.user?.id === USER_ID 
+                      ? "text-cyan-100" 
+                      : msg.isPending 
+                      ? "text-cyan-300/60 italic" 
+                      : "text-purple-100"
+                  }`}>
+                    {msg.text}
+                  </div>
+                  {!msg.isPending && (
+                    <div className={`text-xs mt-2 ${
+                      msg.user?.id === USER_ID ? "text-cyan-400/60" : "text-purple-400/60"
+                    }`}>
+                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
 
           {/* Chat Input */}
           <div className="mt-4">
             <ChatInput
-              disabled={!connected}
+              disabled={!connected || isThinking}
               placeholder="Transmit neural message..."
               onUserGesture={unlockOnce}
               isRecording={isRecording}
@@ -493,6 +568,8 @@ function TanakiExperience() {
             />
           </div>
         </div>
+
+ 
 
         {/* Mute Button */}
         <button
