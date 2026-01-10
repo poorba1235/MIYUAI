@@ -67,8 +67,6 @@ function TanakiExperience() {
   const processedAIResponseIds = useRef<Set<string>>(new Set());
   
   // Track when we sent our last message to know which AI response is for us
-  const lastMessageSentTime = useRef<Date | null>(null);
-  const waitingForResponse = useRef(false);
 
   const unlockOnce = useCallback(() => {
     if (unlockedOnceRef.current) return;
@@ -157,6 +155,7 @@ function TanakiExperience() {
 
   // Process AI responses - FIXED: Only add responses that come AFTER our messages
 // Process AI responses - SIMPLIFIED VERSION
+
 useEffect(() => {
   // Get all AI responses from events
   const aiResponses = events
@@ -170,42 +169,50 @@ useEffect(() => {
 
   if (aiResponses.length === 0) return;
 
-  // Get the most recent AI response
-  const mostRecentResponse = aiResponses[aiResponses.length - 1];
-  
-  // Only add if we haven't processed it yet
-  if (!processedAIResponseIds.current.has(mostRecentResponse.id)) {
-    processedAIResponseIds.current.add(mostRecentResponse.id);
+  // Filter out responses we've already processed
+  const newAIResponses = aiResponses.filter(response => 
+    !processedAIResponseIds.current.has(response.id)
+  );
+
+  if (newAIResponses.length === 0) return;
+
+  // Process ALL new AI responses (not just one)
+  newAIResponses.forEach(response => {
+    processedAIResponseIds.current.add(response.id);
     
     // Add to our messages
     setUserMessages(prev => {
-      // Remove any existing AI messages to avoid duplicates
-      const filteredPrev = prev.filter(msg => !msg.isAI);
-      return [...filteredPrev, mostRecentResponse];
+      // Check if we already have this message (by ID)
+      if (prev.some(msg => msg.id === response.id)) {
+        return prev;
+      }
+      
+      // Add the AI response
+      return [...prev, response];
     });
-  }
+  });
 }, [events]);
 
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim() || !connected) return;
-    
-    // Add user message to UI
-    const userMessage = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      text: text,
-      timestamp: new Date(),
-      isAI: false
-    };
-    
-    setUserMessages(prev => [...prev, userMessage]);
-    
-    // Track that we sent a message and are waiting for response
-    lastMessageSentTime.current = new Date();
-    waitingForResponse.current = true;
-    
-    unlockOnce();
-    await send(text);
+const handleSendMessage = async (text: string) => {
+  if (!text.trim() || !connected) return;
+  
+  // Add user message to UI
+  const userMessage = {
+    id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    text: text,
+    timestamp: new Date(),
+    isAI: false
   };
+  
+  setUserMessages(prev => [...prev, userMessage]);
+  
+  // REMOVE THESE LINES - they cause the problem:
+  // lastMessageSentTime.current = new Date();
+  // waitingForResponse.current = true;
+  
+  unlockOnce();
+  await send(text);
+};
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
