@@ -24,7 +24,7 @@ function readBoolEnv(value: unknown, fallback: boolean): boolean {
 
 export default function TanakiClient() {
   const organization = "local";
-  const local = readBoolEnv(import.meta.env.VITE_SOUL_ENGINE_LOCAL, false);
+  const local = false; // set to true if local dev
 
   // EXACT WebSocket URL from working code
   const getWebSocketUrl =
@@ -73,14 +73,12 @@ function TanakiExperience() {
 
   // When Tanaki says something new, update aria-live text - EXACT from working code
   useEffect(() => {
-    const latest = [...events]
-      .reverse()
-      .find((e) => e._kind === "interactionRequest" && e.action === "says");
-    if (!latest) return;
-    if (lastSpokenIdRef.current === latest._id) return;
+    const latest = [...events].reverse().find((e) => e._kind === "interactionRequest" && e.action === "says");
+    if (!latest || lastSpokenIdRef.current === latest._id) return;
     lastSpokenIdRef.current = latest._id;
     setLiveText(latest.content);
-  }, [events.length, events[events.length - 1]?.content]);
+  }, [events]);
+
 
   // Listen for Soul Engine ephemeral audio events (useTTS) - EXACT from working code
   useEffect(() => {
@@ -356,25 +354,15 @@ const handleSendMessage = async (text: string) => {
                   </div>
 
           <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
-            {userMessages
-              .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-              .slice(-10)
-              .map((msg) => (
-                <div 
-                  key={msg.id}
-                  className={`mb-3 p-3 rounded-xl ${msg.isAI ? "bg-purple-500/10" : "bg-cyan-500/10"}`}
-                >
-                  <strong>{msg.isAI ? "MEILIN" : "YOU"}</strong>
-                  <div>{msg.text}</div>
+                  {[...userMessages, ...events.map(e => ({ id: e._id, text: e.content, isAI: true, timestamp: new Date() }))].sort(
+                    (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+                  ).slice(-10).map(msg => (
+                    <div key={msg.id} className={`mb-3 p-3 rounded-xl ${msg.isAI ? "bg-purple-500/10" : "bg-cyan-500/10"}`}>
+                      <strong>{msg.isAI ? "MEILIN" : "YOU"}</strong>
+                      <div>{msg.text}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            {userMessages.length === 0 && (
-              <div className="text-center py-8 text-cyan-300/50">
-                Start a conversation with MEILIN
-              </div>
-            )}
-          </div>
-
 
         {/* Chat Input */}
         <div className="mt-4">
