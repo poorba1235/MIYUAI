@@ -2,7 +2,7 @@
 
 import loadingAnimation from "@/../public/loading.json";
 import { ChatInput } from "@/components/ChatInput";
-import { FloatingBubbles } from "@/components/FloatingBubbles";
+import { FloatingBubbles } from "@/components/FloatingBubbles"; // ← IMPORT THIS
 import { TanakiAudio } from "@/components/TanakiAudio";
 import { useTanakiSoul } from "@/hooks/useTanakiSoul";
 import { base64ToUint8 } from "@/utils/base64";
@@ -72,7 +72,7 @@ function TanakiExperience() {
     return connected ? "🟢" : "🔴";
   }, [connected]);
 
-  // When Tanaki says something new, update aria-live text - IDENTICAL
+  // When Tanaki says something new, update aria-live text
   useEffect(() => {
     const latest = [...events]
       .reverse()
@@ -83,7 +83,7 @@ function TanakiExperience() {
     setLiveText(latest.content);
   }, [events.length, events[events.length - 1]?.content]);
 
-  // Listen for Soul Engine ephemeral audio events - IDENTICAL
+  // Listen for Soul Engine ephemeral audio events
   useEffect(() => {
     const onChunk = (evt: any) => {
       const data = evt?.data as any;
@@ -131,7 +131,7 @@ function TanakiExperience() {
     };
   }, [soul]);
 
-  // Measure the bottom overlay so bubbles can avoid it - IDENTICAL
+  // Measure the bottom overlay so bubbles can avoid it
   useEffect(() => {
     const el = overlayRef.current;
     if (!el) return;
@@ -159,8 +159,7 @@ function TanakiExperience() {
       }}
       onTouchStartCapture={() => {
         unlockOnce();
-      }}
-    >
+      }}>
       <ModelLoadingOverlay />
       <Tanaki3DExperience
         message={liveText ? { content: liveText, animation: "Action" } : null}
@@ -175,7 +174,8 @@ function TanakiExperience() {
         }}
       />
 
-
+      {/* ↓↓↓ ADD THIS LINE - This is what shows AI responses on screen ↓↓↓ */}
+      <FloatingBubbles events={events} avoidBottomPx={overlayHeight} maxBubbles={5} />
 
       <Box
         ref={overlayRef}
