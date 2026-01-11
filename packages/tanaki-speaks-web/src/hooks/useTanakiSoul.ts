@@ -1,63 +1,75 @@
-import { useCallback } from "react";
 import { useSoul } from "@opensouls/react";
 import { said } from "@opensouls/soul";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePresence } from "./usePresence";
 
-// Consistent session ID for all users to share
-const SHARED_SOUL_ID = "tanaki-shared-session";
-
-export type StoreEvent = {
-  _id: string;
-  _kind: "perception" | "interactionRequest" | "system";
-  _timestamp: number;
-  _pending?: boolean;
-  internal?: boolean;
-  action: string;
-  content: string;
-  name?: string;
-};
+function createSessionId() {
+  return crypto.randomUUID();
+}
 
 export function useTanakiSoul() {
-  const organization = "local";
-  const local = true;
+  const sessionId = useMemo(createSessionId, []);
 
-  // Connect to presence tracking
-  const { connectedUsers: presenceCount, isConnected: presenceConnected } = usePresence({ 
-    enabled: true 
+  const { connectedUsers, isConnected: presenceConnected } = usePresence({
+    enabled: true,
   });
 
-  const { soul, connected, disconnect, store } = useSoul({
+  const { soul, connected, disconnect } = useSoul({
     blueprint: "tanaki-speaks",
-    soulId: SHARED_SOUL_ID,
-    local,
+    soulId: sessionId,
+    local: true,
     token: "test",
     debug: true,
   });
 
-  const events = (store?.events ?? []) as unknown as StoreEvent[];
+  // 🔥 THIS is what you were missing
+  const [aiMessages, setAiMessages] = useState<
+    { id: string; text: string; timestamp: number }[]
+  >([]);
 
-  const send = useCallback(async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  useEffect(() => {
+    const onInteraction = (evt: any) => {
+      const data = evt?.data;
+      if (!data) return;
 
-    // Dispatch with connected count in metadata
-    await soul.dispatch({
-      ...said("User", trimmed),
-      _metadata: {
-        connectedUsers: presenceCount,
-      },
-    });
-  }, [soul, presenceCount]);
+      if (data._kind === "interactionRequest" && data.action === "says") {
+        setAiMessages((prev) => [
+          ...prev,
+          {
+            id: data._id,
+            text: data.content,
+            timestamp: data._timestamp ?? Date.now(),
+          },
+        ]);
+      }
+    };
+
+    soul.on("interactionRequest", onInteraction);
+
+    return () => {
+      soul.off("interactionRequest", onInteraction);
+    };
+  }, [soul]);
+
+  const send = useCallback(
+    async (text: string) => {
+      if (!text.trim() || !connected) return;
+
+      await soul.dispatch({
+        ...said("User", text),
+        _metadata: { connectedUsers },
+      });
+    },
+    [soul, connected, connectedUsers]
+  );
 
   return {
-    organization,
-    local,
     soul,
     connected,
-    events,
     send,
     disconnect,
-    connectedUsers: presenceCount,
+    connectedUsers,
     presenceConnected,
+    aiMessages, // 👈 USE THIS IN UI
   };
 }
