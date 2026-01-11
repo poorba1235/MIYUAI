@@ -2,7 +2,9 @@ import { useCallback } from "react";
 import { useSoul } from "@opensouls/react";
 import { said } from "@opensouls/soul";
 import { usePresence } from "./usePresence";
-import { useUserChat } from "./useUserChat";
+
+// Consistent session ID for all users to share
+const SHARED_SOUL_ID = "tanaki-shared-session";
 
 export type StoreEvent = {
   _id: string;
@@ -18,20 +20,15 @@ export type StoreEvent = {
 export function useTanakiSoul() {
   const organization = "local";
   const local = true;
-  
-  // Get user-specific chat data
-  const { userId, chatId, addMessage } = useUserChat();
 
-  // Connect to presence tracking with user ID
+  // Connect to presence tracking
   const { connectedUsers: presenceCount, isConnected: presenceConnected } = usePresence({ 
-    enabled: true,
-    userId 
+    enabled: true 
   });
 
-  // Use user-specific soul ID
   const { soul, connected, disconnect, store } = useSoul({
     blueprint: "tanaki-speaks",
-    soulId: `tanaki-${userId}-${chatId}`, // Unique per user and session
+    soulId: SHARED_SOUL_ID,
     local,
     token: "test",
     debug: true,
@@ -43,25 +40,14 @@ export function useTanakiSoul() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    // Add user message to chat immediately
-    addMessage({
-      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      text: trimmed,
-      timestamp: new Date(),
-      isAI: false
-    });
-
-    // Dispatch with user-specific metadata
+    // Dispatch with connected count in metadata
     await soul.dispatch({
       ...said("User", trimmed),
       _metadata: {
-        userId,
         connectedUsers: presenceCount,
-        chatId,
-        timestamp: Date.now()
       },
     });
-  }, [soul, userId, chatId, presenceCount, addMessage]);
+  }, [soul, presenceCount]);
 
   return {
     organization,
@@ -73,7 +59,5 @@ export function useTanakiSoul() {
     disconnect,
     connectedUsers: presenceCount,
     presenceConnected,
-    userId,
-    chatId
   };
 }
