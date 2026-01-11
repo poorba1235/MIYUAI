@@ -9,7 +9,7 @@ import { SoulEngineProvider } from "@opensouls/react";
 import { VisuallyHidden } from "@radix-ui/themes";
 import { useProgress } from "@react-three/drei";
 import Lottie from "lottie-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
 
 // Import icons
@@ -58,6 +58,7 @@ function TanakiExperience() {
   const unlockedOnceRef = useRef(false);
   const [overlayHeight, setOverlayHeight] = useState(240);
   const [liveText, setLiveText] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
   // UI state for your design
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -65,22 +66,42 @@ function TanakiExperience() {
   const [isMuted, setIsMuted] = useState(false);
   const [userMessages, setUserMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
 
+  // Update now timestamp every 200ms (same as FloatingBubbles logic)
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(id);
+  }, []);
+
   const unlockOnce = useCallback(() => {
     if (unlockedOnceRef.current) return;
     unlockedOnceRef.current = true;
     void audioRef.current?.unlock();
   }, []);
 
-  // When Tanaki says something new, update aria-live text - EXACT from working code
+  // Filter events with the SAME logic as FloatingBubbles (14 seconds TTL)
+  const recentEvents = useMemo(() => {
+    const baseDurationMs = 20000; // 14 seconds - SAME as FloatingBubbles
+    
+    const relevant = events.filter((e) => {
+      if (e._kind === "perception") return !e.internal && e.action === "said";
+      if (e._kind === "interactionRequest") return e.action === "says";
+      return false;
+    });
+
+    // Only show events from the last 14 seconds
+    return relevant.filter((e) => now - e._timestamp >= 0 && now - e._timestamp < baseDurationMs);
+  }, [events, now]);
+
+  // When Tanaki says something new, update aria-live text
   useEffect(() => {
-    const latest = [...events]
+    const latest = [...recentEvents]
       .reverse()
       .find((e) => e._kind === "interactionRequest" && e.action === "says");
     if (!latest) return;
     if (lastSpokenIdRef.current === latest._id) return;
     lastSpokenIdRef.current = latest._id;
     setLiveText(latest.content);
-  }, [events.length, events[events.length - 1]?.content]);
+  }, [recentEvents.length, recentEvents[recentEvents.length - 1]?.content]);
 
   // Listen for Soul Engine ephemeral audio events (useTTS) - EXACT from working code
   useEffect(() => {
@@ -152,21 +173,28 @@ function TanakiExperience() {
   }, []);
 
   // Simple send function - EXACT from working code
-const handleSendMessage = async (text: string) => {
-  if (!text.trim() || !connected) return;
-  
-  // Add user message to UI immediately
-  const userMessage = {
-    id: `user_${Date.now()}`,
-    text: text,
-    timestamp: new Date()
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim() || !connected) return;
+    
+    // Add user message to UI immediately
+    const userMessage = {
+      id: `user_${Date.now()}`,
+      text: text,
+      timestamp: new Date()
+    };
+    setUserMessages(prev => [...prev, userMessage]);
+    
+    unlockOnce();
+    await send(text);
   };
-  setUserMessages(prev => [...prev, userMessage]);
-  
-  unlockOnce();
-  await send(text);
-};
 
+  // Filter user messages to only show recent ones (14 seconds)
+  const recentUserMessages = useMemo(() => {
+    const baseDurationMs = 14000; // 14 seconds - SAME as events
+    return userMessages.filter(msg => 
+      now - msg.timestamp.getTime() >= 0 && now - msg.timestamp.getTime() < baseDurationMs
+    );
+  }, [userMessages, now]);
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
@@ -337,89 +365,89 @@ const handleSendMessage = async (text: string) => {
         </div>
 
         {/* Chat Interface */}
- <div
-        ref={overlayRef}
-        className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat"
-        style={{ pointerEvents: "auto" as const }}
-      >
-        <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 shadow-inner">
-          <div className="flex items-center gap-3">
-            <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
-            <span className="text-cyan-300 font-bold text-lg tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-              NEURAL_CHAT
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-            <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
-          {[...userMessages, ...events
-            .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
-            .map(event => ({
-              id: event._id,
-              text: event.content,
-              timestamp: new Date(event._timestamp || Date.now()),
-              isAI: true
-            }))]
-            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-            .slice(-10) // Show last 10 messages total
-            .map((msg) => (
-              <div 
-                key={msg.id}
-                className={`mb-3 p-3 rounded-xl ${
-                  msg.isAI 
-                    ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
-                    : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className={`w-2 h-2 rounded-full ${
-                    msg.isAI ? "bg-purple-400" : "bg-cyan-400"
-                  }`}></div>
-                  <strong className={`text-sm ${
-                    msg.isAI ? "text-purple-300" : "text-cyan-300"
-                  }`}>
-                    {msg.isAI ? "MEILIN" : "YOU"}
-                  </strong>
-                  {!msg.isAI && (
-                    <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
-                      <span className="text-xs text-cyan-300 font-medium">LIVE</span>
-                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
-                    </div>
-                  )}
-                </div>
-                <div className={`text-sm ${
-                  msg.isAI ? "text-purple-100" : "text-cyan-100"
-                }`}>
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-          
-          {userMessages.length === 0 && 
-           events.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
-            <div className="text-center py-8 text-cyan-300/50">
-              <div className="text-lg mb-2">Start a conversation with MEILIN</div>
-              <div className="text-sm">Ask anything and get AI-powered responses</div>
+        <div
+          ref={overlayRef}
+          className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat"
+          style={{ pointerEvents: "auto" as const }}
+        >
+          <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 shadow-inner">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
+              <span className="text-cyan-300 font-bold text-lg tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                NEURAL_CHAT
+              </span>
             </div>
-          )}
-        </div>
+            <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+              <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
+            </div>
+          </div>
 
-        {/* Chat Input */}
-        <div className="mt-4">
-          <ChatInput
-            disabled={!connected}
-            onUserGesture={unlockOnce}
-            isRecording={isRecording}
-            onVoiceClick={() => setIsRecording(!isRecording)}
-            onSend={handleSendMessage} // Use the updated function
-            placeholder="Type your message..."
-          />
+          <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
+            {[...recentUserMessages, ...recentEvents
+              .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
+              .map(event => ({
+                id: event._id,
+                text: event.content,
+                timestamp: new Date(event._timestamp || Date.now()),
+                isAI: true
+              }))]
+              .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+              .slice(-10) // Show last 10 messages total
+              .map((msg) => (
+                <div 
+                  key={msg.id}
+                  className={`mb-3 p-3 rounded-xl ${
+                    msg.isAI 
+                      ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
+                      : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`w-2 h-2 rounded-full ${
+                      msg.isAI ? "bg-purple-400" : "bg-cyan-400"
+                    }`}></div>
+                    <strong className={`text-sm ${
+                      msg.isAI ? "text-purple-300" : "text-cyan-300"
+                    }`}>
+                      {msg.isAI ? "MEILIN" : "YOU"}
+                    </strong>
+                    {!msg.isAI && (
+                      <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
+                        <span className="text-xs text-cyan-300 font-medium">LIVE</span>
+                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className={`text-sm ${
+                    msg.isAI ? "text-purple-100" : "text-cyan-100"
+                  }`}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+            
+            {recentUserMessages.length === 0 && 
+             recentEvents.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
+              <div className="text-center py-8 text-cyan-300/50">
+                <div className="text-lg mb-2">Start a conversation with MEILIN</div>
+                <div className="text-sm">Ask anything and get AI-powered responses</div>
+              </div>
+            )}
+          </div>
+
+          {/* Chat Input */}
+          <div className="mt-4">
+            <ChatInput
+              disabled={!connected}
+              onUserGesture={unlockOnce}
+              isRecording={isRecording}
+              onVoiceClick={() => setIsRecording(!isRecording)}
+              onSend={handleSendMessage}
+              placeholder="Type your message..."
+            />
+          </div>
         </div>
-      </div>
 
         {/* Mute Button */}
         <button
@@ -547,4 +575,3 @@ function ModelLoadingOverlay({ active, progress }: ModelLoadingOverlayProps) {
     </div>
   );
 }
-
