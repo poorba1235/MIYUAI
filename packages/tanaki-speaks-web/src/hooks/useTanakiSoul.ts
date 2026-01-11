@@ -1,23 +1,8 @@
+import { useCallback } from "react";
 import { useSoul } from "@opensouls/react";
 import { said } from "@opensouls/soul";
-import { useCallback, useMemo } from "react";
 import { usePresence } from "./usePresence";
-
-// Generate unique session ID for each user/browser
-const getOrCreateSessionId = () => {
-  if (typeof window === "undefined") return "server-session";
-  
-  // Try to get existing session from localStorage
-  let sessionId = localStorage.getItem("tanaki-session-id");
-  
-  // If no session exists or it's the shared one, create new
-  if (!sessionId || sessionId === "tanaki-shared-session") {
-    sessionId = `tanaki-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    localStorage.setItem("tanaki-session-id", sessionId);
-  }
-  
-  return sessionId;
-};
+import { useUserChat } from "./useUserChat";
 
 export type StoreEvent = {
   _id: string;
@@ -33,18 +18,20 @@ export type StoreEvent = {
 export function useTanakiSoul() {
   const organization = "local";
   const local = true;
-
-  // Generate unique session ID for this user
-  const sessionId = useMemo(() => getOrCreateSessionId(), []);
   
-  // Connect to presence tracking
+  // Get user-specific chat data
+  const { userId, chatId, addMessage } = useUserChat();
+
+  // Connect to presence tracking with user ID
   const { connectedUsers: presenceCount, isConnected: presenceConnected } = usePresence({ 
-    enabled: true 
+    enabled: true,
+    userId 
   });
 
+  // Use user-specific soul ID
   const { soul, connected, disconnect, store } = useSoul({
     blueprint: "tanaki-speaks",
-    soulId: sessionId, // Use unique session ID
+    soulId: `tanaki-${userId}-${chatId}`, // Unique per user and session
     local,
     token: "test",
     debug: true,
@@ -56,25 +43,25 @@ export function useTanakiSoul() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    // Add user message to chat immediately
+    addMessage({
+      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      text: trimmed,
+      timestamp: new Date(),
+      isAI: false
+    });
+
+    // Dispatch with user-specific metadata
     await soul.dispatch({
       ...said("User", trimmed),
       _metadata: {
+        userId,
         connectedUsers: presenceCount,
+        chatId,
+        timestamp: Date.now()
       },
     });
-  }, [soul, presenceCount]);
-
-  // Clear chat for this session
-  const clearSession = useCallback(() => {
-    // Create fresh session ID
-    const newSessionId = `tanaki-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    localStorage.setItem("tanaki-session-id", newSessionId);
-    
-    // Disconnect and let parent component reload with new session
-    disconnect();
-    
-    return newSessionId;
-  }, [disconnect]);
+  }, [soul, userId, chatId, presenceCount, addMessage]);
 
   return {
     organization,
@@ -84,9 +71,9 @@ export function useTanakiSoul() {
     events,
     send,
     disconnect,
-    clearSession,
     connectedUsers: presenceCount,
     presenceConnected,
-    sessionId,
+    userId,
+    chatId
   };
 }

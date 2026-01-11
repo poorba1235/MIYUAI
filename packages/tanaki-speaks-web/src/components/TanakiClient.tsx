@@ -4,6 +4,7 @@ import loadingAnimation from "@/../public/loading.json";
 import { ChatInput } from "@/components/ChatInput";
 import { TanakiAudio } from "@/components/TanakiAudio";
 import { useTanakiSoul } from "@/hooks/useTanakiSoul";
+import { useUserChat } from "@/hooks/useUserChat";
 import { base64ToUint8 } from "@/utils/base64";
 import { SoulEngineProvider } from "@opensouls/react";
 import { VisuallyHidden } from "@radix-ui/themes";
@@ -13,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
 
 // Import icons
-import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
+import { Cpu, Home, Menu, Settings, Users, Zap, X } from "lucide-react";
 
 function readBoolEnv(value: unknown, fallback: boolean): boolean {
   if (typeof value !== "string") return fallback;
@@ -48,8 +49,23 @@ export default function TanakiClient() {
 }
 
 function TanakiExperience() {
-  // EXACTLY same as working code
-  const { connected, events, send, connectedUsers, soul, clearSession } = useTanakiSoul();
+  // Use both hooks
+  const { 
+    connected, 
+    events, 
+    send, 
+    connectedUsers, 
+    soul,
+    userId,
+    chatId 
+  } = useTanakiSoul();
+  
+  const { 
+    chatMessages, 
+    addMessage, 
+    clearChat 
+  } = useUserChat();
+  
   const audioRef = useRef<TanakiAudioHandle | null>(null);
   const lastSpokenIdRef = useRef<string | null>(null);
   const activeTtsStreamIdRef = useRef<string | null>(null);
@@ -63,17 +79,7 @@ function TanakiExperience() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  
-  // User-specific chat state - cleared on refresh
-  const [chatMessages, setChatMessages] = useState<Array<{
-    id: string;
-    text: string;
-    isAI: boolean;
-    timestamp: number;
-  }>>([]);
-  
-  // Track processed AI responses for this session
-  const processedAIResponseIds = useRef<Set<string>>(new Set());
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const unlockOnce = useCallback(() => {
     if (unlockedOnceRef.current) return;
@@ -81,24 +87,32 @@ function TanakiExperience() {
     void audioRef.current?.unlock();
   }, []);
 
-  // Clear chat when component mounts (fresh start for each user)
-  useEffect(() => {
-    setChatMessages([]);
-    processedAIResponseIds.current.clear();
-    lastSpokenIdRef.current = null;
-    console.log("Chat cleared for new session");
-  }, []);
-
-  // When Tanaki says something new, update aria-live text - EXACT from working code
+  // When Tanaki says something new, update aria-live text and add to chat
   useEffect(() => {
     const latest = [...events]
       .reverse()
       .find((e) => e._kind === "interactionRequest" && e.action === "says");
+    
     if (!latest) return;
     if (lastSpokenIdRef.current === latest._id) return;
+    
     lastSpokenIdRef.current = latest._id;
     setLiveText(latest.content);
-  }, [events.length, events[events.length - 1]?.content]);
+    
+    // Check if this AI message is already in our chat
+    const isDuplicate = chatMessages.some(msg => 
+      msg.isAI && msg.id === latest._id
+    );
+    
+    if (!isDuplicate) {
+      addMessage({
+        id: latest._id,
+        text: latest.content,
+        timestamp: new Date(latest._timestamp || Date.now()),
+        isAI: true
+      });
+    }
+  }, [events, chatMessages, addMessage]);
 
   // Listen for Soul Engine ephemeral audio events (useTTS) - EXACT from working code
   useEffect(() => {
@@ -169,66 +183,12 @@ function TanakiExperience() {
     };
   }, []);
 
-  // Add AI responses to chat
-  useEffect(() => {
-    const aiResponses = events.filter(e => 
-      e._kind === "interactionRequest" && e.action === "says"
-    );
-
-    aiResponses.forEach(event => {
-      // Only add if not already processed for this session
-      if (!processedAIResponseIds.current.has(event._id)) {
-        processedAIResponseIds.current.add(event._id);
-        
-        setChatMessages(prev => {
-          if (prev.some(msg => msg.id === event._id)) return prev;
-          return [...prev, {
-            id: event._id,
-            text: event.content,
-            isAI: true,
-            timestamp: event._timestamp
-          }];
-        });
-      }
-    });
-  }, [events]);
-
-  // Simple send function - EXACT from working code
+  // Simple send function
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !connected) return;
     
-    // Add user message to UI immediately
-    const userMessage = {
-      id: `user_${Date.now()}`,
-      text: text,
-      isAI: false,
-      timestamp: Date.now()
-    };
-    setChatMessages(prev => [...prev, userMessage]);
-    
     unlockOnce();
     await send(text);
-  };
-
-  // Clear chat function
-  const clearChat = () => {
-    if (confirm("Clear your chat history?")) {
-      setChatMessages([]);
-      processedAIResponseIds.current.clear();
-      lastSpokenIdRef.current = null;
-      console.log("Chat cleared by user");
-    }
-  };
-
-  // Start new session (fresh chat)
-  const startNewSession = () => {
-    if (confirm("Start a new chat session?")) {
-      clearSession(); // This creates new session ID
-      setChatMessages([]);
-      processedAIResponseIds.current.clear();
-      lastSpokenIdRef.current = null;
-      console.log("New session started");
-    }
   };
 
   const toggleMute = () => {
@@ -276,6 +236,45 @@ function TanakiExperience() {
         }}
       />
 
+      {/* Clear Chat Confirmation Overlay */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-gradient-to-br from-gray-900 to-cyan-900/20 p-6 rounded-2xl border border-cyan-500/30 shadow-2xl max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-cyan-300" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                Clear Chat
+              </h3>
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="p-2 hover:bg-red-500/20 rounded-lg text-red-300 hover:text-red-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-cyan-100 mb-6">
+              Are you sure you want to clear all chat messages? This will start a fresh conversation and cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 py-3 rounded-xl border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  clearChat();
+                  setShowClearConfirm(false);
+                }}
+                className="flex-1 py-3 rounded-xl bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 transition-colors"
+              >
+                Clear Chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* UI Overlay */}
       <div
         className="fixed top-0 left-0 w-full h-full z-10 flex flex-col justify-between p-6"
@@ -315,25 +314,13 @@ function TanakiExperience() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* Clear Chat Button */}
-              <button
-                onClick={clearChat}
-                className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 hover:text-red-100 transition-all duration-300 text-sm font-medium"
-                style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                title="Clear your chat history"
-              >
-                🗑️ Clear Chat
-              </button>
-
-              {/* New Session Button */}
-              <button
-                onClick={startNewSession}
-                className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-300 hover:text-green-100 transition-all duration-300 text-sm font-medium"
-                style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                title="Start new chat session"
-              >
-                🆕 New Session
-              </button>
+              {/* Session Info */}
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span className="text-xs text-cyan-300 font-medium">
+                  Session: {chatId.substring(0, 8)}...
+                </span>
+              </div>
 
               {/* Social Links */}
               <div className="hidden md:flex items-center gap-3">
@@ -377,20 +364,6 @@ function TanakiExperience() {
                     </a>
                   ))}
                   <div className="border-t border-cyan-500/20 pt-3 mt-2">
-                    <button
-                      onClick={clearChat}
-                      className="w-full text-red-200 hover:text-red-100 p-3 rounded-lg hover:bg-red-500/10 transition-all duration-200 text-center font-medium"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      🗑️ Clear Chat
-                    </button>
-                    <button
-                      onClick={startNewSession}
-                      className="w-full text-green-200 hover:text-green-100 p-3 rounded-lg hover:bg-green-500/10 transition-all duration-200 text-center font-medium"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      🆕 New Session
-                    </button>
                     <a
                       href="#"
                       className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium block"
@@ -446,57 +419,59 @@ function TanakiExperience() {
                 NEURAL_CHAT
               </span>
             </div>
-            <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowClearConfirm(true)}
+                className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 hover:text-red-100 transition-all duration-300"
+              >
+                Clear Chat
+              </button>
+              <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
+              </div>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3">
-            {chatMessages.length === 0 ? (
+            {chatMessages.slice(-10).map((msg) => (
+              <div 
+                key={msg.id}
+                className={`mb-3 p-3 rounded-xl ${
+                  msg.isAI 
+                    ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
+                    : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <div className={`w-2 h-2 rounded-full ${
+                    msg.isAI ? "bg-purple-400" : "bg-cyan-400"
+                  }`}></div>
+                  <strong className={`text-sm ${
+                    msg.isAI ? "text-purple-300" : "text-cyan-300"
+                  }`}>
+                    {msg.isAI ? "MEILIN" : "YOU"}
+                  </strong>
+                  {!msg.isAI && (
+                    <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
+                      <span className="text-xs text-cyan-300 font-medium">LIVE</span>
+                      <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                    </div>
+                  )}
+                </div>
+                <div className={`text-sm ${
+                  msg.isAI ? "text-purple-100" : "text-cyan-100"
+                }`}>
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            
+            {chatMessages.length === 0 && (
               <div className="text-center py-8 text-cyan-300/50">
                 <div className="text-lg mb-2">Start a conversation with MEILIN</div>
                 <div className="text-sm">Ask anything and get AI-powered responses</div>
               </div>
-            ) : (
-              chatMessages
-                .sort((a, b) => a.timestamp - b.timestamp)
-                .slice(-10)
-                .map((msg) => (
-                  <div 
-                    key={msg.id}
-                    className={`mb-3 p-3 rounded-xl ${
-                      msg.isAI 
-                        ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
-                        : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-2 h-2 rounded-full ${
-                        msg.isAI ? "bg-purple-400" : "bg-cyan-400"
-                      }`}></div>
-                      <strong className={`text-sm ${
-                        msg.isAI ? "text-purple-300" : "text-cyan-300"
-                      }`}>
-                        {msg.isAI ? "MEILIN" : "YOU"}
-                      </strong>
-                      {!msg.isAI && (
-                        <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
-                          <span className="text-xs text-cyan-300 font-medium">LIVE</span>
-                          <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
-                        </div>
-                      )}
-                    </div>
-                    <div className={`text-sm ${
-                      msg.isAI ? "text-purple-100" : "text-cyan-100"
-                    }`}>
-                      {msg.text}
-                    </div>
-                    <div className="text-xs mt-1 opacity-50">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                  </div>
-                ))
             )}
           </div>
 
@@ -513,13 +488,20 @@ function TanakiExperience() {
           </div>
         </div>
 
-        {/* Mute Button */}
-        <button
-          onClick={toggleMute}
-          className="fixed bottom-6 right-6 z-20 p-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25 pointer-events-auto"
-        >
-          {isMuted ? "🔇" : "🔊"}
-        </button>
+        {/* Control Buttons */}
+        <div className="fixed bottom-6 right-6 z-20 flex flex-col gap-3 items-end">
+          <button
+            onClick={toggleMute}
+            className="p-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25 pointer-events-auto"
+          >
+            {isMuted ? "🔇" : "🔊"}
+          </button>
+          
+          {/* User ID Indicator (optional) */}
+          <div className="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-300 pointer-events-auto">
+            User: {userId.substring(0, 8)}...
+          </div>
+        </div>
 
         <VisuallyHidden>
           <div aria-live="polite" aria-atomic="true">
