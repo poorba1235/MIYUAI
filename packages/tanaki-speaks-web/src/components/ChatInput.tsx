@@ -1,5 +1,5 @@
 import { Box, Flex } from "@radix-ui/themes";
-import { Send, Mic } from "lucide-react";
+import { Mic, Send } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 export type ChatInputProps = {
