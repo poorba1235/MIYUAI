@@ -1,28 +1,21 @@
 /** @typedef {import("@/components/TanakiAudio").TanakiAudioHandle} TanakiAudioHandle */
 
 import { ChatInput } from "@/components/ChatInput";
-import { TanakiAudio } from "@/components/TanakiAudio";
+import { TanakiAudio, type TanakiAudioHandle } from "@/components/TanakiAudio";
 import { useTanakiSoul } from "@/hooks/useTanakiSoul";
 import { base64ToUint8 } from "@/utils/base64";
 import { SoulEngineProvider } from "@opensouls/react";
+import { Box, Flex, Text, VisuallyHidden } from "@radix-ui/themes";
 import { useProgress } from "@react-three/drei";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
-
-/* -------------------------------------------------- */
-/* Utils */
-/* -------------------------------------------------- */
+import { FloatingBubbles } from "./FloatingBubbles";
 
 function readBoolEnv(value: unknown, fallback: boolean): boolean {
   if (typeof value !== "string") return fallback;
   if (value === "true") return true;
   if (value === "false") return false;
   return fallback;
-}
-
-function normalizeTimestamp(ts: number) {
-  // Handles seconds vs milliseconds safely
-  return ts < 1e12 ? ts * 1000 : ts;
 }
 
 /* -------------------------------------------------- */
@@ -68,15 +61,6 @@ function TanakiExperience() {
 
   const [liveText, setLiveText] = useState("");
   const [mouthBlend, setMouthBlend] = useState(0);
-  const lastSpokenIdRef = useRef<string | null>(null);
-  const [messages, setMessages] = useState<
-    Array<{
-      id: string;
-      text: string;
-      isAI: boolean;
-      timestamp: number;
-    }>
-  >([]);
 
   /* -------------------------------------------------- */
   /* Audio unlock */
@@ -89,31 +73,21 @@ function TanakiExperience() {
   }, []);
 
   /* -------------------------------------------------- */
-  /* Collect AI messages (SAFE) */
+  /* Collect latest AI response (for ARIA) */
   /* -------------------------------------------------- */
 
-useEffect(() => {
-  const latest = [...events]
-    .reverse()
-    .find((e) => e._kind === "interactionRequest" && e.action === "says");
+  const lastSpokenIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const latest = [...events]
+      .reverse()
+      .find((e) => e._kind === "interactionRequest" && e.action === "says");
 
-  if (!latest) return;
-  if (lastSpokenIdRef.current === latest._id) return;
+    if (!latest) return;
+    if (lastSpokenIdRef.current === latest._id) return;
 
-  lastSpokenIdRef.current = latest._id;
-
-  setMessages((prev) => [
-    ...prev,
-    {
-      id: latest._id,
-      text: latest.content,
-      isAI: true,
-      timestamp: normalizeTimestamp(latest._timestamp),
-    },
-  ]);
-
-  setLiveText(latest.content);
-}, [events]);
+    lastSpokenIdRef.current = latest._id;
+    setLiveText(latest.content);
+  }, [events]);
 
   /* -------------------------------------------------- */
   /* TTS audio stream */
@@ -153,27 +127,6 @@ useEffect(() => {
   }, [soul]);
 
   /* -------------------------------------------------- */
-  /* Send user message */
-  /* -------------------------------------------------- */
-
-  const handleSend = async (text: string) => {
-    if (!text.trim() || !connected) return;
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `user-${Date.now()}`,
-        text,
-        isAI: false,
-        timestamp: Date.now(),
-      },
-    ]);
-
-    unlockOnce();
-    await send(text);
-  };
-
-  /* -------------------------------------------------- */
   /* Loader */
   /* -------------------------------------------------- */
 
@@ -182,6 +135,8 @@ useEffect(() => {
   /* -------------------------------------------------- */
   /* Render */
   /* -------------------------------------------------- */
+
+  const status = connected ? "🟢" : "🔴";
 
   return (
     <div
@@ -223,47 +178,45 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4">
-          <div className="max-w-2xl mx-auto space-y-3">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${
-                  msg.isAI ? "justify-start" : "justify-end"
-                }`}
-              >
-                <div
-                  className={`px-4 py-3 rounded-lg max-w-[80%] ${
-                    msg.isAI
-                      ? "bg-purple-700 text-white"
-                      : "bg-blue-700 text-white"
-                  }`}
-                >
-                  <div className="text-xs font-semibold mb-1">
-                    {msg.isAI ? "MEILIN" : "You"}
-                  </div>
-                  <div className="text-sm">{msg.text}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* Chat messages */}
+        <FloatingBubbles events={events} />
 
         {/* Input */}
-        <div className="p-4">
-          <div className="max-w-2xl mx-auto">
-            <div className="sr-only" aria-live="polite">
-              {liveText}
-            </div>
-            <ChatInput
-              disabled={!connected}
-              onUserGesture={unlockOnce}
-              onSend={handleSend}
-              placeholder="Message MEILIN…"
-            />
-          </div>
-        </div>
+        <Box
+          className="absolute left-4 right-4 bottom-4 max-w-2xl mx-auto"
+          style={{
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(10px)",
+            borderRadius: 12,
+            padding: 12,
+          }}
+        >
+          <Flex justify="between" align="center">
+            <Flex gap="2">
+              <Text size="2">{status}</Text>
+              {connectedUsers > 0 && (
+                <Text size="1" color="gray">
+                  {connectedUsers} here
+                </Text>
+              )}
+            </Flex>
+            <Text size="2" color="gray">
+              tanaki
+            </Text>
+          </Flex>
+
+          <VisuallyHidden>
+            <div aria-live="polite">{liveText}</div>
+          </VisuallyHidden>
+
+          <ChatInput
+            onUserGesture={unlockOnce}
+            onSend={async (text) => {
+              unlockOnce();
+              await send(text);
+            }}
+          />
+        </Box>
       </div>
 
       {/* Loading */}
