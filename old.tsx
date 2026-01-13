@@ -12,8 +12,9 @@ import Lottie from "lottie-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
 
+
 // Import icons
-import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
+import NavigationBar from "./NavigationBar";
 
 function readBoolEnv(value: unknown, fallback: boolean): boolean {
   if (typeof value !== "string") return fallback;
@@ -300,17 +301,40 @@ function TanakiExperience() {
   // Model loading
   const { active, progress } = useProgress();
 
-  const menuItems = [
-    { icon: Home, label: "Dashboard", active: true },
-    { icon: Users, label: "Community" },
-    { icon: Cpu, label: "Models" },
-    { icon: Zap, label: "Features" },
-    { icon: Settings, label: "Settings" }
-  ];
+  const [activeView, setActiveView] = useState<'chat' | 'models' | 'community' | 'settings'>('chat');
+  const [showModelsPanel, setShowModelsPanel] = useState(false);
 
-  const mobileMenuItems = ["Dashboard", "Community", "Models", "Features", "Settings"];
+  const handleMenuItemClick = (item: string) => {
+    console.log(`Clicked: ${item}`);
+    
+    switch(item.toLowerCase()) {
+      case 'models':
+        setActiveView('models');
+        setShowModelsPanel(true);
+        // You could also:
+        // - Show a models selection panel
+        // - Change the 3D model
+        // - Load different AI models
+        // - Open a settings modal
+        break;
+      case 'dashboard':
+        setActiveView('chat');
+        setShowModelsPanel(false);
+        break;
+      case 'community':
+        setActiveView('community');
+        // Show community features
+        break;
+      case 'settings':
+        setActiveView('settings');
+        // Open settings
+        break;
+      default:
+        break;
+    }
+  };
 
-  return (
+return (
     <div
       style={{ height: "100dvh", width: "100%", position: "relative" }}
       onPointerDownCapture={() => {
@@ -320,16 +344,26 @@ function TanakiExperience() {
         unlockOnce();
       }}
     >
-      {/* 3D Model Loading Overlay */}
+      {/* 3D Model Loading Overlay - ALWAYS show when loading */}
       <ModelLoadingOverlay active={active} progress={progress} />
 
-      {/* 3D Experience - Full Screen Background */}
-      <Tanaki3DExperience
-        message={liveText ? { content: liveText, animation: "Action" } : null}
-        chat={() => console.log("Chat triggered")}
-      />
+      {/* 3D Experience - FULL SCREEN, ALWAYS show */}
+      <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", zIndex: 0 }}>
+        <Tanaki3DExperience
+          message={liveText ? { content: liveText, animation: "Action" } : null}
+          chat={() => console.log("Chat triggered")}
+        />
+      </div>
       
-      {/* 🔊 Audio Component - EXACT from working code */}
+      {/* Dim overlay when models panel is open */}
+      {showModelsPanel && (
+        <div 
+          className="fixed top-0 left-0 w-full h-full bg-black/30 z-10"
+          style={{ pointerEvents: "none" }}
+        />
+      )}
+      
+      {/* 🔊 Audio Component - ALWAYS show */}
       <TanakiAudio
         ref={audioRef}
         enabled={!isMuted}
@@ -340,263 +374,283 @@ function TanakiExperience() {
 
       {/* UI Overlay */}
       <div
-        className="fixed top-0 left-0 w-full h-full z-10 flex flex-col justify-between p-6"
+        className="fixed top-0 left-0 w-full h-full z-20 flex flex-col justify-between p-6"
         style={{ pointerEvents: "none" as const }}
       >
         <div>
-          <nav
-            className="flex flex-row md:flex-row gap-4 px-5 py-3 items-center justify-between md:items-start pointer-events-auto rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-gray-900/10 to-cyan-900/10 shadow-2xl"
-            style={{ pointerEvents: "auto" as const }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
-                <a
-                  href="/"
-                  className="text-cyan-300 font-bold text-xl hover:text-cyan-100 transition-all duration-300 hover:drop-shadow-glow"
-                  style={{ fontFamily: "'Orbitron', sans-serif", letterSpacing: "0.1em" }}
+          <NavigationBar 
+            isMenuOpen={isMenuOpen}
+            setIsMenuOpen={setIsMenuOpen}
+            onMenuItemClick={handleMenuItemClick}
+          />
+
+          {/* Models Panel - Show over the dimmed 3D model */}
+          {showModelsPanel && (
+            <div 
+              className="mt-4 p-6 rounded-2xl bg-gradient-to-br from-gray-900/95 to-purple-900/95 border border-purple-500/30 shadow-2xl backdrop-blur-lg w-full"
+              style={{ pointerEvents: "auto" as const }}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 bg-purple-400 rounded-full animate-pulse"></div>
+                  <h3 className="text-purple-300 font-bold text-2xl" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                    AI MODELS DASHBOARD
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowModelsPanel(false)}
+                  className="text-cyan-300 hover:text-cyan-100 p-2 rounded-xl hover:bg-cyan-500/10 border border-cyan-500/30 transition-all duration-300"
                 >
-                  MIYU AI
-                </a>
+                  <span className="text-lg">✕ CLOSE</span>
+                </button>
               </div>
               
-              <div className="hidden md:flex items-center gap-1 ml-6">
-                {menuItems.map((item, index) => (
-                  <a
-                    key={index}
-                    href="#"
-                    className="flex items-center gap-2 text-cyan-200/80 hover:text-cyan-100 px-4 py-2 rounded-xl hover:bg-cyan-500/10 transition-all duration-300 border border-transparent hover:border-cyan-500/30 group"
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {[
+                  { name: 'GPT-4 Turbo', provider: 'OpenAI', description: 'Most capable model', status: 'active' },
+                  { name: 'Claude-3 Opus', provider: 'Anthropic', description: 'Reasoning focused', status: 'available' },
+                  { name: 'Llama-3 70B', provider: 'Meta', description: 'Open source leader', status: 'available' },
+                  { name: 'Gemini Pro', provider: 'Google', description: 'Multimodal expert', status: 'active' },
+                  { name: 'Mistral Large', provider: 'Mistral AI', description: 'European champion', status: 'available' },
+                  { name: 'GPT-4o', provider: 'OpenAI', description: 'Latest multimodal', status: 'available' },
+                  { name: 'Claude-3 Sonnet', provider: 'Anthropic', description: 'Balanced performance', status: 'available' },
+                  { name: 'Custom Model', provider: 'MEILIN.AI', description: 'Your trained model', status: 'custom' }
+                ].map((model) => (
+                  <div
+                    key={model.name}
+                    className="p-5 rounded-2xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 border border-purple-500/30 hover:border-cyan-500/50 transition-all duration-300 hover:scale-[1.02] group cursor-pointer"
+                    onClick={() => {
+                      console.log(`Selected model: ${model.name}`);
+                      setShowModelsPanel(false);
+                    }}
                   >
-                    <item.icon size={16} className="group-hover:scale-110 transition-transform" />
-                    <span className="font-medium text-sm" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
-                      {item.label}
-                    </span>
-                  </a>
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h4 className="text-white font-bold text-lg mb-1" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+                          {model.name}
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-cyan-300 text-sm">{model.provider}</span>
+                          <div className={`w-2 h-2 rounded-full ${
+                            model.status === 'active' ? 'bg-green-400 animate-pulse' : 
+                            model.status === 'custom' ? 'bg-cyan-400' : 'bg-purple-400'
+                          }`}></div>
+                        </div>
+                      </div>
+                      {model.status === 'active' && (
+                        <span className="px-3 py-1 bg-green-500/20 text-green-300 text-xs rounded-full border border-green-500/30">
+                          ACTIVE
+                        </span>
+                      )}
+                    </div>
+                    
+                    <p className="text-cyan-200/80 text-sm mb-4">
+                      {model.description}
+                    </p>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-1">
+                        <div className="w-1 h-3 bg-cyan-400 rounded-full group-hover:animate-pulse"></div>
+                        <div className="w-1 h-3 bg-purple-400 rounded-full group-hover:animate-pulse delay-100"></div>
+                        <div className="w-1 h-3 bg-cyan-400 rounded-full group-hover:animate-pulse delay-200"></div>
+                      </div>
+                      <span className="text-cyan-300 text-sm font-medium group-hover:text-cyan-100 transition-colors">
+                        SELECT →
+                      </span>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              {/* Social Links */}
-              <div className="hidden md:flex items-center gap-3">
-                <a
-                  href="#"
-                  className="px-4 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 text-sm font-medium"
-                  style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                >
-                  TWITTER
-                </a>
-                <a
-                  href="#"
-                  className="px-4 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-purple-100 transition-all duration-300 text-sm font-medium"
-                  style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                >
-                  GITHUB
-                </a>
-              </div>
-
-              <div className="md:hidden relative">
-                <button
-                  onClick={() => setIsMenuOpen(!isMenuOpen)}
-                  className="p-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25"
-                >
-                  <Menu size={20} />
-                </button>
-
-                <div
-                  className={`absolute ${isMenuOpen ? "flex opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"} 
-                    flex-col bg-gray-900/10 border border-cyan-500/20 p-4 rounded-2xl right-0 top-full w-64 
-                    transition-all duration-300 shadow-2xl z-20`}
-                >
-                  {mobileMenuItems.map((item) => (
-                    <a
-                      key={item}
-                      href="#"
-                      className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
+              
+              <div className="mt-8 pt-6 border-t border-purple-500/30">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="text-cyan-200/80">
+                    <p className="font-medium mb-1" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+                      Current Model: <span className="text-cyan-300">GPT-4 Turbo</span>
+                    </p>
+                    <p className="text-sm">
+                      Select a different AI model to power your conversation. Each model has unique capabilities.
+                    </p>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => console.log("Refreshing models...")}
+                      className="px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 text-sm font-medium"
                     >
-                      {item}
-                    </a>
-                  ))}
-                  <div className="border-t border-cyan-500/20 pt-3 mt-2">
-                    <a
-                      href="#"
-                      className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium block"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                      REFRESH
+                    </button>
+                    <button
+                      onClick={() => console.log("Opening settings...")}
+                      className="px-4 py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-purple-300 hover:text-purple-100 transition-all duration-300 text-sm font-medium"
                     >
-                      TWITTER
-                    </a>
-                    <a
-                      href="#"
-                      className="text-purple-200 hover:text-purple-100 p-3 rounded-lg hover:bg-purple-500/10 transition-all duration-200 text-center font-medium block"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      GITHUB
-                    </a>
+                      SETTINGS
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
-          </nav>
+          )}
 
-          <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'end', marginTop: '25px', marginRight: "20px" }}>
-            <div className="flex items-center gap-3 py-2 px-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/30 shadow-lg">
-              <div className="flex items-center gap-2">
-                <span className="text-cyan-300 font-bold text-sm tracking-wider">LIVE CHAT</span>
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-150"></div>
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-300"></div>
+          {/* Connection Status - Show only when NOT in models panel */}
+          {!showModelsPanel && (
+            <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'end', marginTop: '25px', marginRight: "20px" }}>
+              <div className="flex items-center gap-3 py-2 px-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/30 shadow-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-cyan-300 font-bold text-sm tracking-wider">LIVE CHAT</span>
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-150"></div>
+                    <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse delay-300"></div>
+                  </div>
                 </div>
+                <div className="w-px h-4 bg-cyan-500/40"></div>
+                <span className="text-cyan-200/80 text-xs font-medium">
+                  {connectedUsers} {connectedUsers === 1 ? "user" : "users"} online
+                </span>
+                <div className="w-px h-4 bg-cyan-500/40"></div>
+                <span className="text-cyan-200/80 text-xs font-medium">
+                  {connected ? "🟢 Connected" : "🔴 Disconnected"}
+                </span>
               </div>
-              <div className="w-px h-4 bg-cyan-500/40"></div>
-              <span className="text-cyan-200/80 text-xs font-medium">
-                {connectedUsers} {connectedUsers === 1 ? "user" : "users"} online
-              </span>
-              <div className="w-px h-4 bg-cyan-500/40"></div>
-              <span className="text-cyan-200/80 text-xs font-medium">
-                {connected ? "🟢 Connected" : "🔴 Disconnected"}
-              </span>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Chat Interface */}
-        <div
-          ref={overlayRef}
-          className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat chat-container"
-          style={{ pointerEvents: "auto" as const }}
-        >
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 shadow-inner">
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
-              <span className="text-cyan-300 font-bold text-lg tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-                NEURAL_CHAT
-              </span>
+        {/* Chat Interface - Hide when in models panel */}
+        {!showModelsPanel && (
+          <div
+            ref={overlayRef}
+            className="w-full md:w-[480px] h-[55vh] md:h-[75vh] flex flex-col bg-gradient-to-br from-gray-900/10 to-cyan-900/10 p-5 rounded-3xl shadow-2xl border border-cyan-500/20 pointer-events-auto fixed bottom-0 left-0 md:relative md:bottom-auto md:left-auto mobile-chat chat-container"
+            style={{ pointerEvents: "auto" as const }}
+          >
+            <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20 shadow-inner">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
+                <span className="text-cyan-300 font-bold text-lg tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                  NEURAL_CHAT
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-cyan-200/70 text-sm">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span style={{ fontFamily: "'Rajdhani', sans-serif" }}>SYSTEM ACTIVE</span>
-            </div>
-          </div>
 
-          <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3 chat-messages">
-            {[...recentUserMessages, ...recentEvents
-              .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
-              .map(event => ({
-                id: event._id,
-                text: event.content,
-                timestamp: new Date(event._timestamp || Date.now()),
-                isAI: true
-              }))]
-              .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-              .slice(-10) // Show last 10 messages total
-              .map((msg) => (
-                <div 
-                  key={msg.id}
-                  className={`mb-3 p-3 rounded-xl ${
-                    msg.isAI 
-                      ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
-                      : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className={`w-2 h-2 rounded-full ${
-                      msg.isAI ? "bg-purple-400" : "bg-cyan-400"
-                    }`}></div>
-                    <strong className={`text-sm ${
-                      msg.isAI ? "text-purple-300" : "text-cyan-300"
+            <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3 chat-messages">
+              {[...recentUserMessages, ...recentEvents
+                .filter(e => e._kind === "interactionRequest" && e.action === "says" && e.content)
+                .map(event => ({
+                  id: event._id,
+                  text: event.content,
+                  timestamp: new Date(event._timestamp || Date.now()),
+                  isAI: true
+                }))]
+                .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+                .slice(-10)
+                .map((msg) => (
+                  <div 
+                    key={msg.id}
+                    className={`mb-3 p-3 rounded-xl ${
+                      msg.isAI 
+                        ? "bg-purple-500/10 border border-purple-500/30 ml-8" 
+                        : "bg-cyan-500/10 border border-cyan-500/30 mr-8"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className={`w-2 h-2 rounded-full ${
+                        msg.isAI ? "bg-purple-400" : "bg-cyan-400"
+                      }`}></div>
+                      <strong className={`text-sm ${
+                        msg.isAI ? "text-purple-300" : "text-cyan-300"
+                      }`}>
+                        {msg.isAI ? "MEILIN" : "YOU"}
+                      </strong>
+                      {!msg.isAI && (
+                        <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
+                          <span className="text-xs text-cyan-300 font-medium">LIVE</span>
+                          <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                        </div>
+                      )}
+                    </div>
+                    <div className={`text-sm ${
+                      msg.isAI ? "text-purple-100" : "text-cyan-100"
                     }`}>
-                      {msg.isAI ? "MEILIN" : "YOU"}
-                    </strong>
-                    {!msg.isAI && (
-                      <div className="flex items-center gap-1 bg-cyan-500/20 px-2 py-1 rounded-full">
-                        <span className="text-xs text-cyan-300 font-medium">LIVE</span>
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
-                      </div>
-                    )}
+                      {msg.text}
+                    </div>
                   </div>
-                  <div className={`text-sm ${
-                    msg.isAI ? "text-purple-100" : "text-cyan-100"
-                  }`}>
-                    {msg.text}
+                ))}
+              
+              {recentUserMessages.length === 0 && 
+               recentEvents.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
+                <div className="text-center py-8 text-cyan-300/50">
+                  <div className="text-lg mb-2">Start a conversation</div>
+                  <div className="text-sm">Type or speak to begin chatting</div>
+                </div>
+              )}
+            </div>
+
+            {/* Voice Input Indicator */}
+            {isRecording && (
+              <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 sm:w-3 sm:h-3 bg-red-400 rounded-full"></div>
+                    <strong className="text-cyan-300 text-xs sm:text-sm">LISTENING...</strong>
                   </div>
                 </div>
-              ))}
-            
-            {recentUserMessages.length === 0 && 
-             recentEvents.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
-              <div className="text-center py-8 text-cyan-300/50">
-                <div className="text-lg mb-2"></div>
-                <div className="text-sm"></div>
+                
+                <div className="mt-2 text-cyan-200 text-xs sm:text-sm">
+                  {finalTranscript && <div className="mb-1 break-words">{finalTranscript}</div>}
+                  {interimTranscript && <div className="italic text-cyan-300/70 break-words">{interimTranscript}</div>}
+                  {!finalTranscript && !interimTranscript && (
+                    <div className="italic text-cyan-300/50">Speak now...</div>
+                  )}
+                </div>
+                
+                <div className="flex gap-0.5 sm:gap-1 mt-2 sm:mt-3 mb-2">
+                  <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
+                  <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
+                  <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
+                  <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
+                </div>
+                
+                {(finalTranscript.trim() || interimTranscript.trim()) && (
+                  <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-cyan-500/20">
+                    <button
+                      onClick={handleVoiceMessage}
+                      className="w-full px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-lg bg-gradient-to-r from-cyan-500/40 to-purple-500/40 hover:from-cyan-500/50 hover:to-purple-500/50 border border-cyan-400/50 text-cyan-100 hover:text-white transition-all duration-300 text-xs sm:text-sm font-medium shadow-lg hover:shadow-cyan-500/40 pointer-events-auto flex items-center justify-center gap-1 sm:gap-2"
+                    >
+                      <span className="text-xs sm:text-sm">📤</span>
+                      <span className="whitespace-nowrap">SEND VOICE MESSAGE</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
-          </div>
 
-          {/* Voice Input Indicator */}
-{isRecording && (
-  <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30">
-    <div className="flex items-center justify-between mb-2">
-      <div className="flex items-center gap-2">
-        <div className="w-2 h-2 sm:w-3 sm:h-3 bg-red-400 rounded-full"></div>
-        <strong className="text-cyan-300 text-xs sm:text-sm">LISTENING...</strong>
-      </div>
-    </div>
-    
-    <div className="mt-2 text-cyan-200 text-xs sm:text-sm">
-      {finalTranscript && <div className="mb-1 break-words">{finalTranscript}</div>}
-      {interimTranscript && <div className="italic text-cyan-300/70 break-words">{interimTranscript}</div>}
-      {!finalTranscript && !interimTranscript && (
-        <div className="italic text-cyan-300/50">Speak now...</div>
-      )}
-    </div>
-    
-    <div className="flex gap-0.5 sm:gap-1 mt-2 sm:mt-3 mb-2">
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
-    </div>
-    
-    {(finalTranscript.trim() || interimTranscript.trim()) && (
-      <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-cyan-500/20">
+            {/* Chat Input */}
+            <div className="mt-4">
+              <ChatInput
+                disabled={!connected}
+                onUserGesture={unlockOnce}
+                isRecording={isRecording}
+                onVoiceClick={toggleVoiceRecording}
+                onSend={handleSendMessage}
+                placeholder="Type your message..."
+                voiceTranscript={finalTranscript || interimTranscript}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Mute Button - Always show */}
         <button
-          onClick={handleVoiceMessage}
-          className="w-full px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-lg bg-gradient-to-r from-cyan-500/40 to-purple-500/40 hover:from-cyan-500/50 hover:to-purple-500/50 border border-cyan-400/50 text-cyan-100 hover:text-white transition-all duration-300 text-xs sm:text-sm font-medium shadow-lg hover:shadow-cyan-500/40 pointer-events-auto flex items-center justify-center gap-1 sm:gap-2"
+          onClick={toggleMute}
+          className="fixed top-52 right-6 z-30 p-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25 pointer-events-auto sm:top-auto sm:bottom-6"
         >
-          <span className="text-xs sm:text-sm">📤</span>
-          <span className="whitespace-nowrap">SEND VOICE MESSAGE</span>
+          {isMuted ? "🔇" : "🔊"}
         </button>
-      </div>
-    )}
-  </div>
-)}
-
-          {/* Chat Input */}
-          <div className="mt-4">
-            <ChatInput
-              disabled={!connected}
-              onUserGesture={unlockOnce}
-              isRecording={isRecording}
-              onVoiceClick={toggleVoiceRecording}
-              onSend={handleSendMessage}
-              placeholder="Type your message..."
-              // Pass voice transcription state if you want to modify ChatInput
-              voiceTranscript={finalTranscript || interimTranscript}
-            />
-          </div>
-        </div>
-
-        {/* Mute Button */}
-      <button
-  onClick={toggleMute}
-  className="fixed top-52 right-6 z-20 p-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25 pointer-events-auto sm:top-auto sm:bottom-6"
->
-  {isMuted ? "🔇" : "🔊"}
-</button>
-
-        {/* Voice Send Button (only shown when we have voice transcript) */}
-
 
         <VisuallyHidden>
           <div aria-live="polite" aria-atomic="true">
@@ -706,7 +760,6 @@ function TanakiExperience() {
     </div>
   );
 }
-
 /* -------------------------------------------------- */
 /* 3D Model Loading Overlay */
 /* -------------------------------------------------- */

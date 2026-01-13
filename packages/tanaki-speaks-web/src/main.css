@@ -1,0 +1,30 @@
+/* Add these styles to your global CSS file */
+.floating-bubbles-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.bubbles-stack {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+/* Ensure proper stacking */
+.tanaki-3d-experience {
+  z-index: 10;
+}
+
+/* Chat input overlay */
+.chat-overlay {
+  z-index: 30;
+}
+
+/* Loading overlay */
+.loading-overlay {
+  z-index: 40;
+}
