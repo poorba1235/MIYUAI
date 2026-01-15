@@ -29,8 +29,8 @@ describe("useTTS - SubroutineRunner", () => {
       const soulCompartment = await compartmentalizeWithEngine(() => {
         const introduction: EngineProcess = async ({ workingMemory }) => {
           const broadcaster = useTTS({
-            voice: "nova",
-            instructions: "speak like a morbid detective",
+            voice: "shimmer",
+            instructions: "Speak like a cheerful, high-pitched anime girl, lively and expressive",
           })
 
           await broadcaster.speak("hello there")
