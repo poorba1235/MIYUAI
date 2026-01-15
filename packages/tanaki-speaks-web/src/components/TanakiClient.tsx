@@ -28,10 +28,12 @@ async function speakTextWithElevenLabs(text: string) {
     });
 
     const response = new Response(stream as any); // TS fix for ReadableStream
+    console.log(response);
     const audioBlob = await response.blob();
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
     audio.play();
+    
   } catch (err) {
     console.error("ElevenLabs TTS error:", err);
   }
@@ -181,11 +183,11 @@ function TanakiExperience() {
     }
   };
 
-  const unlockOnce = useCallback(() => {
-    if (unlockedOnceRef.current) return;
-    unlockedOnceRef.current = true;
-    void audioRef.current?.unlock();
-  }, []);
+  // const unlockOnce = useCallback(() => {
+  //   if (unlockedOnceRef.current) return;
+  //   unlockedOnceRef.current = true;
+  //   void audioRef.current?.unlock();
+  // }, []);
 
   // Filter events with the SAME logic as FloatingBubbles (14 seconds TTL)
   const recentEvents = useMemo(() => {
@@ -354,13 +356,13 @@ function TanakiExperience() {
       />
       
       {/* 🔊 Audio Component - EXACT from working code */}
-      <TanakiAudio
+      {/* <TanakiAudio
         ref={audioRef}
         enabled={!isMuted}
         onVolumeChange={(volume) => {
           setBlend((prev) => prev * 0.5 + volume * 0.5);
         }}
-      />
+      /> */}
 
       {/* UI Overlay */}
       <div
