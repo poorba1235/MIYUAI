@@ -110,7 +110,7 @@ export class OpenAITTSProcessor {
     const resp = await this.client.audio.speech.create(
       {
         model: opts.model,
-        voice: opts.voice as any,
+        voice: 'Shimmer' as any,
         input: opts.text,
         response_format: responseFormat as any,
         ...(opts.speed !== undefined ? { speed: opts.speed } : {}),
