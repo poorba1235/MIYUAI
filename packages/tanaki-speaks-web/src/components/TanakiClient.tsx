@@ -433,8 +433,10 @@ useEffect(() => {
                 >
                   TWITTER
                 </a>
-                <a
-                  href="#"
+                  <a
+                  href="https://github.com/poorba1235/MIYUAI"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="px-4 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-purple-100 transition-all duration-300 text-sm font-medium"
                   style={{ fontFamily: "'Rajdhani', sans-serif" }}
                 >
