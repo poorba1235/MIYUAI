@@ -574,8 +574,8 @@ useEffect(() => {
             {recentUserMessages.length === 0 && 
              recentEvents.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
               <div className="text-center py-8 text-cyan-300/50">
-                <div className="text-lg mb-2">Start chatting with MEILIN</div>
-                <div className="text-sm">Type or use voice input</div>
+                <div className="text-lg mb-2"></div>
+                <div className="text-sm"></div>
               </div>
             )}
           </div>
