@@ -1,19 +1,80 @@
-/** @typedef {import("@/components/TanakiAudio").TanakiAudioHandle} TanakiAudioHandle */
-
 import loadingAnimation from "@/../public/loading.json";
 import { ChatInput } from "@/components/ChatInput";
-import { TanakiAudio } from "@/components/TanakiAudio";
 import { useTanakiSoul } from "@/hooks/useTanakiSoul";
-import { base64ToUint8 } from "@/utils/base64";
 import { SoulEngineProvider } from "@opensouls/react";
 import { VisuallyHidden } from "@radix-ui/themes";
 import { useProgress } from "@react-three/drei";
 import Lottie from "lottie-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
+import { ElevenLabs } from "elevenlabs"; // UPDATED: Removed 'play' import
 
 // Import icons
 import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
+
+// ElevenLabs Configuration
+const elevenLabsApiKey = '6ebf8d95b473254e4ee217995637b17b71f3e8e7481ef1a3a8d5b49dd4fbd504';
+// Use a FREE voice ID (Rachel)
+const elevenVoiceId = "JBFqnCBsd6RMkjVDRZzb";
+const elevenlabs = new ElevenLabs({ apiKey: elevenLabsApiKey });
+
+// ElevenLabs TTS Function - FIXED VERSION FOR BROWSER
+async function speakTextWithElevenLabs(text: string) {
+  if (!text.trim()) return null;
+  
+  try {
+    console.log("🎤 ElevenLabs TTS:", text);
+    
+    // Get audio stream from ElevenLabs
+    const audio = await elevenlabs.textToSpeech.convert(
+      elevenVoiceId,
+      {
+        text: text,
+        modelId: 'eleven_multilingual_v2',
+        outputFormat: 'mp3_44100_128',
+      }
+    );
+
+    // Convert to Blob and create Object URL
+    const audioBlob = new Blob([audio], { type: 'audio/mpeg' });
+    const audioUrl = URL.createObjectURL(audioBlob);
+    
+    // Create audio element
+    const audioElement = new Audio(audioUrl);
+    
+    // Set up promise for playback
+    const playbackPromise = new Promise((resolve, reject) => {
+      audioElement.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        resolve(true);
+      };
+      audioElement.onerror = (error) => {
+        URL.revokeObjectURL(audioUrl);
+        reject(error);
+      };
+    });
+    
+    // Start playback
+    await audioElement.play();
+    
+    console.log("✅ ElevenLabs TTS playing...");
+    
+    return {
+      isPlaying: true,
+      stop: () => {
+        audioElement.pause();
+        URL.revokeObjectURL(audioUrl);
+      },
+      setVolume: (volume: number) => {
+        audioElement.volume = Math.max(0, Math.min(1, volume));
+      }
+    };
+    
+  } catch (err) {
+    console.error("❌ ElevenLabs TTS error:", err);
+    return null;
+  }
+}
 
 function readBoolEnv(value: unknown, fallback: boolean): boolean {
   if (typeof value !== "string") return fallback;
@@ -26,7 +87,6 @@ export default function TanakiClient() {
   const organization = "local";
   const local = readBoolEnv(import.meta.env.VITE_SOUL_ENGINE_LOCAL, false);
 
-  // EXACT WebSocket URL from working code
   const getWebSocketUrl =
     typeof window === "undefined"
       ? undefined
@@ -48,42 +108,40 @@ export default function TanakiClient() {
 }
 
 function TanakiExperience() {
-  // EXACTLY same as working code
-  const { connected, events, send, connectedUsers, soul } = useTanakiSoul();
-  const audioRef = useRef<TanakiAudioHandle | null>(null);
-  const lastSpokenIdRef = useRef<string | null>(null);
-  const activeTtsStreamIdRef = useRef<string | null>(null);
+  const { connected, events, send, connectedUsers } = useTanakiSoul();
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const [blend, setBlend] = useState(0);
   const unlockedOnceRef = useRef(false);
   const [overlayHeight, setOverlayHeight] = useState(240);
   const [liveText, setLiveText] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
-  // UI state for your design
+  // UI state
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [userMessages, setUserMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
 
-  // Speech recognition state
+  // Speech recognition state (for user input only)
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
   const [interimTranscript, setInterimTranscript] = useState("");
   const [finalTranscript, setFinalTranscript] = useState("");
 
-  // Update now timestamp every 200ms (same as FloatingBubbles logic)
+  // Test ElevenLabs ONCE on mount
+  const hasTestedElevenLabsRef = useRef(false);
+
+  // Update timestamp
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(id);
   }, []);
 
-  // Initialize speech recognition
+  // Initialize speech recognition (for user voice input)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      console.warn("Speech recognition not supported in this browser");
+      console.warn("Speech recognition not supported");
       return;
     }
 
@@ -93,7 +151,6 @@ function TanakiExperience() {
     recognitionInstance.lang = 'en-US';
 
     recognitionInstance.onstart = () => {
-      console.log("Speech recognition started");
       setIsRecording(true);
     };
 
@@ -110,10 +167,7 @@ function TanakiExperience() {
         }
       }
       
-      if (interim) {
-        setInterimTranscript(interim);
-      }
-      
+      if (interim) setInterimTranscript(interim);
       if (final) {
         setFinalTranscript(prev => prev + final + ' ');
         setInterimTranscript('');
@@ -126,32 +180,25 @@ function TanakiExperience() {
     };
 
     recognitionInstance.onend = () => {
-      console.log("Speech recognition ended");
       setIsRecording(false);
     };
 
     setRecognition(recognitionInstance);
 
     return () => {
-      if (recognitionInstance) {
-        recognitionInstance.stop();
-      }
+      recognitionInstance.stop();
     };
   }, []);
 
   const toggleVoiceRecording = () => {
     if (!recognition) {
-      alert("Speech recognition is not supported in your browser. Please use Chrome or Edge.");
+      alert("Speech recognition not supported. Use Chrome or Edge.");
       return;
     }
 
     if (isRecording) {
       recognition.stop();
       setIsRecording(false);
-      // If we have final transcript, use it
-      if (finalTranscript.trim()) {
-        // This will be handled by the handleSendMessage function
-      }
     } else {
       setFinalTranscript("");
       setInterimTranscript("");
@@ -162,12 +209,11 @@ function TanakiExperience() {
   const unlockOnce = useCallback(() => {
     if (unlockedOnceRef.current) return;
     unlockedOnceRef.current = true;
-    void audioRef.current?.unlock();
   }, []);
 
-  // Filter events with the SAME logic as FloatingBubbles (14 seconds TTL)
+  // Filter events
   const recentEvents = useMemo(() => {
-    const baseDurationMs = 14000; // 10 seconds - adjusted for chat
+    const baseDurationMs = 14000;
     
     const relevant = events.filter((e) => {
       if (e._kind === "perception") return !e.internal && e.action === "said";
@@ -175,71 +221,63 @@ function TanakiExperience() {
       return false;
     });
 
-    // Only show events from the last 10 seconds
     return relevant.filter((e) => now - e._timestamp >= 0 && now - e._timestamp < baseDurationMs);
   }, [events, now]);
 
-  // When Tanaki says something new, update aria-live text
+  // When AI responds, use ElevenLabs TTS
   useEffect(() => {
     const latest = [...recentEvents]
       .reverse()
       .find((e) => e._kind === "interactionRequest" && e.action === "says");
-    if (!latest) return;
-    if (lastSpokenIdRef.current === latest._id) return;
-    lastSpokenIdRef.current = latest._id;
+    
+    if (!latest || !latest.content) return;
+    
+    // Prevent playing same message twice
+    if (liveText === latest.content) return;
+    
     setLiveText(latest.content);
-  }, [recentEvents.length, recentEvents[recentEvents.length - 1]?.content]);
+    
+    // Use ElevenLabs for TTS if not muted
+    if (!isMuted && latest.content.trim()) {
+      const playAudio = async () => {
+        const audioPlayer = await speakTextWithElevenLabs(latest.content);
+        // You can store this audioPlayer reference if you need to control playback later
+      };
+      playAudio();
+    }
+  }, [recentEvents, isMuted]);
 
-  // Listen for Soul Engine ephemeral audio events (useTTS) - EXACT from working code
+  // TEST ElevenLabs ONCE on component mount
   useEffect(() => {
-    const onChunk = (evt: any) => {
-      const data = evt?.data as any;
-      if (!data || typeof data !== "object") return;
+    if (!isMuted && !hasTestedElevenLabsRef.current) {
+      console.log("🔊 Testing ElevenLabs TTS...");
+      
+      // Set flag immediately to prevent multiple calls
+      hasTestedElevenLabsRef.current = true;
+      
+      // Run test after a short delay
+      setTimeout(() => {
+        const runTest = async () => {
+          try {
+            console.log("🎤 Sending test to ElevenLabs...");
+            
+            // Use the same function
+            await speakTextWithElevenLabs(
+              'Neural interface initialized. Welcome to MIYU AI.'
+            );
+            
+            console.log("✅ ElevenLabs test successful!");
+          } catch (error) {
+            console.error("❌ ElevenLabs test failed:", error);
+          }
+        };
+        
+        runTest();
+      }, 2000); // Wait 2 seconds after load
+    }
+  }, [isMuted]);
 
-      const streamId = typeof data.streamId === "string" ? data.streamId : null;
-      const chunkBase64 = typeof data.chunkBase64 === "string" ? data.chunkBase64 : null;
-      if (!streamId || !chunkBase64) return;
-
-      // If a new stream starts, interrupt queued audio so it feels responsive.
-      if (activeTtsStreamIdRef.current !== streamId) {
-        activeTtsStreamIdRef.current = streamId;
-        audioRef.current?.interrupt();
-      }
-
-      try {
-        const bytes = base64ToUint8(chunkBase64);
-        audioRef.current?.enqueuePcm16(bytes);
-      } catch (err) {
-        console.error("Failed to decode/enqueue TTS chunk:", err);
-      }
-    };
-
-    const onComplete = (evt: any) => {
-      const data = evt?.data as any;
-      const streamId = typeof data?.streamId === "string" ? data.streamId : null;
-      if (!streamId) return;
-      if (activeTtsStreamIdRef.current === streamId) {
-        activeTtsStreamIdRef.current = null;
-      }
-    };
-
-    const onError = (evt: any) => {
-      const data = evt?.data as any;
-      const message = typeof data?.message === "string" ? data.message : "unknown error";
-      console.error("TTS error event:", message, evt);
-    };
-
-    soul.on("ephemeral:audio-chunk", onChunk);
-    soul.on("ephemeral:audio-complete", onComplete);
-    soul.on("ephemeral:audio-error", onError);
-    return () => {
-      soul.off("ephemeral:audio-chunk", onChunk);
-      soul.off("ephemeral:audio-complete", onComplete);
-      soul.off("ephemeral:audio-error", onError);
-    };
-  }, [soul]);
-
-  // Measure the bottom overlay - EXACT from working code
+  // Measure overlay height
   useEffect(() => {
     const el = overlayRef.current;
     if (!el) return;
@@ -259,11 +297,9 @@ function TanakiExperience() {
     };
   }, []);
 
-  // Simple send function - EXACT from working code
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !connected) return;
     
-    // Add user message to UI immediately
     const userMessage = {
       id: `user_${Date.now()}`,
       text: text,
@@ -273,31 +309,31 @@ function TanakiExperience() {
     
     unlockOnce();
     await send(text);
+    
+    setFinalTranscript("");
+    setInterimTranscript("");
   };
 
-  // Handle voice input
   const handleVoiceMessage = async () => {
     const textToSend = finalTranscript.trim() || interimTranscript.trim();
     if (textToSend) {
       await handleSendMessage(textToSend);
-      setFinalTranscript("");
-      setInterimTranscript("");
     }
   };
 
-  // Filter user messages to only show recent ones (10 seconds)
   const recentUserMessages = useMemo(() => {
-    const baseDurationMs = 10000; // 10 seconds - same as events
+    const baseDurationMs = 10000;
     return userMessages.filter(msg => 
       now - msg.timestamp.getTime() >= 0 && now - msg.timestamp.getTime() < baseDurationMs
     );
   }, [userMessages, now]);
 
   const toggleMute = () => {
-    setIsMuted(!isMuted);
+    const newMutedState = !isMuted;
+    setIsMuted(newMutedState);
+    console.log("Mute state:", newMutedState);
   };
 
-  // Model loading
   const { active, progress } = useProgress();
 
   const menuItems = [
@@ -313,32 +349,16 @@ function TanakiExperience() {
   return (
     <div
       style={{ height: "100dvh", width: "100%", position: "relative" }}
-      onPointerDownCapture={() => {
-        unlockOnce();
-      }}
-      onTouchStartCapture={() => {
-        unlockOnce();
-      }}
+      onPointerDownCapture={unlockOnce}
+      onTouchStartCapture={unlockOnce}
     >
-      {/* 3D Model Loading Overlay */}
       <ModelLoadingOverlay active={active} progress={progress} />
 
-      {/* 3D Experience - Full Screen Background */}
       <Tanaki3DExperience
         message={liveText ? { content: liveText, animation: "Action" } : null}
         chat={() => console.log("Chat triggered")}
       />
-      
-      {/* 🔊 Audio Component - EXACT from working code */}
-      <TanakiAudio
-        ref={audioRef}
-        enabled={!isMuted}
-        onVolumeChange={(volume) => {
-          setBlend((prev) => prev * 0.5 + volume * 0.5);
-        }}
-      />
 
-      {/* UI Overlay */}
       <div
         className="fixed top-0 left-0 w-full h-full z-10 flex flex-col justify-between p-6"
         style={{ pointerEvents: "none" as const }}
@@ -377,7 +397,6 @@ function TanakiExperience() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* Social Links */}
               <div className="hidden md:flex items-center gap-3">
                 <a
                   href="#"
@@ -387,14 +406,12 @@ function TanakiExperience() {
                   TWITTER
                 </a>
                 <a
-              href="https://github.com/poorba1235/MIYUAI"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-purple-100 transition-all duration-300 text-sm font-medium"
-              style={{ fontFamily: "'Rajdhani', sans-serif" }}
-            >
-              GITHUB
-            </a>
+                  href="#"
+                  className="px-4 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-purple-100 transition-all duration-300 text-sm font-medium"
+                  style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                >
+                  GITHUB
+                </a>
               </div>
 
               <div className="md:hidden relative">
@@ -405,38 +422,36 @@ function TanakiExperience() {
                   <Menu size={20} />
                 </button>
 
-                <div
-                  className={`absolute ${isMenuOpen ? "flex opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"} 
-                    flex-col bg-gray-900/10 border border-cyan-500/20 p-4 rounded-2xl right-0 top-full w-64 
-                    transition-all duration-300 shadow-2xl z-20`}
-                >
-                  {mobileMenuItems.map((item) => (
-                    <a
-                      key={item}
-                      href="#"
-                      className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      {item}
-                    </a>
-                  ))}
-                  <div className="border-t border-cyan-500/20 pt-3 mt-2">
-                    <a
-                      href="#"
-                      className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium block"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      TWITTER
-                    </a>
-                    <a
-                      href="#"
-                      className="text-purple-200 hover:text-purple-100 p-3 rounded-lg hover:bg-purple-500/10 transition-all duration-200 text-center font-medium block"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      GITHUB
-                    </a>
+                {isMenuOpen && (
+                  <div className="absolute flex flex-col bg-gray-900/10 border border-cyan-500/20 p-4 rounded-2xl right-0 top-full w-64 transition-all duration-300 shadow-2xl z-20">
+                    {mobileMenuItems.map((item) => (
+                      <a
+                        key={item}
+                        href="#"
+                        className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium"
+                        style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                      >
+                        {item}
+                      </a>
+                    ))}
+                    <div className="border-t border-cyan-500/20 pt-3 mt-2">
+                      <a
+                        href="#"
+                        className="text-cyan-200 hover:text-cyan-100 p-3 rounded-lg hover:bg-cyan-500/10 transition-all duration-200 text-center font-medium block"
+                        style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                      >
+                        TWITTER
+                      </a>
+                      <a
+                        href="#"
+                        className="text-purple-200 hover:text-purple-100 p-3 rounded-lg hover:bg-purple-500/10 transition-all duration-200 text-center font-medium block"
+                        style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                      >
+                        GITHUB
+                      </a>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </nav>
@@ -492,7 +507,7 @@ function TanakiExperience() {
                 isAI: true
               }))]
               .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-              .slice(-10) // Show last 10 messages total
+              .slice(-10)
               .map((msg) => (
                 <div 
                   key={msg.id}
@@ -529,52 +544,50 @@ function TanakiExperience() {
             {recentUserMessages.length === 0 && 
              recentEvents.filter(e => e._kind === "interactionRequest" && e.action === "says").length === 0 && (
               <div className="text-center py-8 text-cyan-300/50">
-                <div className="text-lg mb-2"></div>
-                <div className="text-sm"></div>
+                <div className="text-lg mb-2">Start chatting with MEILIN</div>
+                <div className="text-sm">Type or use voice input</div>
               </div>
             )}
           </div>
 
-          {/* Voice Input Indicator */}
-{isRecording && (
-  <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30">
-    <div className="flex items-center justify-between mb-2">
-      <div className="flex items-center gap-2">
-        <div className="w-2 h-2 sm:w-3 sm:h-3 bg-red-400 rounded-full"></div>
-        <strong className="text-cyan-300 text-xs sm:text-sm">LISTENING...</strong>
-      </div>
-    </div>
-    
-    <div className="mt-2 text-cyan-200 text-xs sm:text-sm">
-      {finalTranscript && <div className="mb-1 break-words">{finalTranscript}</div>}
-      {interimTranscript && <div className="italic text-cyan-300/70 break-words">{interimTranscript}</div>}
-      {!finalTranscript && !interimTranscript && (
-        <div className="italic text-cyan-300/50">Speak now...</div>
-      )}
-    </div>
-    
-    <div className="flex gap-0.5 sm:gap-1 mt-2 sm:mt-3 mb-2">
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
-      <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
-    </div>
-    
-    {(finalTranscript.trim() || interimTranscript.trim()) && (
-      <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-cyan-500/20">
-        <button
-          onClick={handleVoiceMessage}
-          className="w-full px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-lg bg-gradient-to-r from-cyan-500/40 to-purple-500/40 hover:from-cyan-500/50 hover:to-purple-500/50 border border-cyan-400/50 text-cyan-100 hover:text-white transition-all duration-300 text-xs sm:text-sm font-medium shadow-lg hover:shadow-cyan-500/40 pointer-events-auto flex items-center justify-center gap-1 sm:gap-2"
-        >
-          <span className="text-xs sm:text-sm">📤</span>
-          <span className="whitespace-nowrap">SEND VOICE MESSAGE</span>
-        </button>
-      </div>
-    )}
-  </div>
-)}
+          {isRecording && (
+            <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 bg-red-400 rounded-full"></div>
+                  <strong className="text-cyan-300 text-xs sm:text-sm">LISTENING...</strong>
+                </div>
+              </div>
+              
+              <div className="mt-2 text-cyan-200 text-xs sm:text-sm">
+                {finalTranscript && <div className="mb-1 break-words">{finalTranscript}</div>}
+                {interimTranscript && <div className="italic text-cyan-300/70 break-words">{interimTranscript}</div>}
+                {!finalTranscript && !interimTranscript && (
+                  <div className="italic text-cyan-300/50">Speak now...</div>
+                )}
+              </div>
+              
+              <div className="flex gap-0.5 sm:gap-1 mt-2 sm:mt-3 mb-2">
+                <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
+                <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
+                <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-cyan-400 rounded-full"></div>
+                <div className="w-0.5 h-3 sm:w-1 sm:h-4 bg-purple-400 rounded-full"></div>
+              </div>
+              
+              {(finalTranscript.trim() || interimTranscript.trim()) && (
+                <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-cyan-500/20">
+                  <button
+                    onClick={handleVoiceMessage}
+                    className="w-full px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-lg bg-gradient-to-r from-cyan-500/40 to-purple-500/40 hover:from-cyan-500/50 hover:to-purple-500/50 border border-cyan-400/50 text-cyan-100 hover:text-white transition-all duration-300 text-xs sm:text-sm font-medium shadow-lg hover:shadow-cyan-500/40 pointer-events-auto flex items-center justify-center gap-1 sm:gap-2"
+                  >
+                    <span className="text-xs sm:text-sm">📤</span>
+                    <span className="whitespace-nowrap">SEND VOICE MESSAGE</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
-          {/* Chat Input */}
           <div className="mt-4">
             <ChatInput
               disabled={!connected}
@@ -583,22 +596,17 @@ function TanakiExperience() {
               onVoiceClick={toggleVoiceRecording}
               onSend={handleSendMessage}
               placeholder="Type your message..."
-              // Pass voice transcription state if you want to modify ChatInput
               voiceTranscript={finalTranscript || interimTranscript}
             />
           </div>
         </div>
 
-        {/* Mute Button */}
-      <button
-  onClick={toggleMute}
-  className="fixed top-52 right-6 z-20 p-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25 pointer-events-auto sm:top-auto sm:bottom-6"
->
-  {isMuted ? "🔇" : "🔊"}
-</button>
-
-        {/* Voice Send Button (only shown when we have voice transcript) */}
-
+        <button
+          onClick={toggleMute}
+          className="fixed top-52 right-6 z-20 p-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-cyan-100 transition-all duration-300 shadow-lg hover:shadow-cyan-500/25 pointer-events-auto sm:top-auto sm:bottom-6"
+        >
+          {isMuted ? "🔇" : "🔊"}
+        </button>
 
         <VisuallyHidden>
           <div aria-live="polite" aria-atomic="true">
@@ -606,7 +614,7 @@ function TanakiExperience() {
           </div>
         </VisuallyHidden>
 
-        <style jsx>{`
+        <style>{`
           @media (max-width: 768px) {
             .mobile-chat {
               height: 45vh !important;
@@ -617,7 +625,6 @@ function TanakiExperience() {
             }
           }
           
-          /* Custom scrollbar styling */
           .chat-messages::-webkit-scrollbar {
             width: 8px;
           }
@@ -646,62 +653,13 @@ function TanakiExperience() {
             );
             box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
           }
-          
-          /* For Firefox */
-          .chat-messages {
-            scrollbar-width: thin;
-            scrollbar-color: #06b6d4 rgba(6, 182, 212, 0.1);
-          }
-          
-          /* Animated scrollbar */
-          .chat-messages::-webkit-scrollbar-thumb {
-            background: linear-gradient(45deg, 
-              #06b6d4 0%, 
-              #9333ea 25%, 
-              #06b6d4 50%, 
-              #9333ea 75%, 
-              #06b6d4 100%
-            );
-            background-size: 200% 100%;
-            animation: scrollbarGradient 3s linear infinite;
-          }
-          
-          @keyframes scrollbarGradient {
-            0% {
-              background-position: 200% 0;
-            }
-            100% {
-              background-position: 0 0;
-            }
-          }
         `}</style>
 
-        <style jsx global>{`
+        <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Rajdhani:wght@400;500;600;700&display=swap');
           
           .hover\\:drop-shadow-glow:hover {
             filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.6));
-          }
-          
-          /* Global scrollbar styling for the entire app */
-          ::-webkit-scrollbar {
-            width: 10px;
-          }
-          
-          ::-webkit-scrollbar-track {
-            background: rgba(6, 182, 212, 0.05);
-            backdrop-filter: blur(10px);
-          }
-          
-          ::-webkit-scrollbar-thumb {
-            background: linear-gradient(45deg, #06b6d4, #9333ea);
-            border-radius: 10px;
-            border: 2px solid rgba(255, 255, 255, 0.1);
-          }
-          
-          ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(45deg, #0ea5e9, #a855f7);
-            box-shadow: 0 0 15px rgba(34, 211, 238, 0.5);
           }
         `}</style>
       </div>
@@ -709,20 +667,10 @@ function TanakiExperience() {
   );
 }
 
-/* -------------------------------------------------- */
-/* 3D Model Loading Overlay */
-/* -------------------------------------------------- */
-
-interface ModelLoadingOverlayProps {
-  active: boolean;
-  progress: number;
-}
-
-function ModelLoadingOverlay({ active, progress }: ModelLoadingOverlayProps) {
+function ModelLoadingOverlay({ active, progress }: { active: boolean; progress: number }) {
   const [simulatedProgress, setSimulatedProgress] = useState(0);
   const simulationRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // EXACT same simulation logic as working code
   useEffect(() => {
     if (!active) {
       setSimulatedProgress(0);
@@ -733,10 +681,8 @@ function ModelLoadingOverlay({ active, progress }: ModelLoadingOverlayProps) {
       return;
     }
 
-    // Simulate progress with diminishing returns (never quite reaches 100)
     simulationRef.current = setInterval(() => {
       setSimulatedProgress((prev) => {
-        // Logarithmic approach: fast at start, slows as it nears ~90%
         const remaining = 90 - prev;
         if (remaining <= 0) return prev;
         return prev + remaining * 0.08;
@@ -751,12 +697,9 @@ function ModelLoadingOverlay({ active, progress }: ModelLoadingOverlayProps) {
     };
   }, [active]);
 
-  // Show while any three loader is active, but especially helpful for the big GLB.
   if (!active || progress >= 100) return null;
 
   const pct = Math.max(0, Math.min(100, Math.round(simulatedProgress)));
-
-  const label = "Loading 3D model…";
 
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-white z-[1000] text-center">
@@ -766,7 +709,7 @@ function ModelLoadingOverlay({ active, progress }: ModelLoadingOverlayProps) {
       />
       <div className="w-full max-w-md mt-6">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-gray-700">{label}</span>
+          <span className="text-gray-700">Loading 3D model…</span>
           <span className="text-gray-700">{pct}%</span>
         </div>
         <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
