@@ -258,48 +258,64 @@ function TanakiExperience() {
   }, [audioUnlocked]);
 
 
+// Add this state
+const [accumulatedMessages, setAccumulatedMessages] = useState<Record<string, string>>({});
+
+// Updated useEffect
 useEffect(() => {
-  const latest = [...recentEvents]
-    .reverse()
-    .find((e) => e._kind === "interactionRequest" && e.action === "says");
+  // Get all recent "says" events
+  const saysEvents = recentEvents
+    .filter((e) => e._kind === "interactionRequest" && e.action === "says" && e.content)
+    .sort((a, b) => (a._timestamp || 0) - (b._timestamp || 0)); // Oldest first
   
-  if (!latest || !latest.content) return;
+  if (saysEvents.length === 0) return;
   
-  const content = latest.content.trim();
+  // Accumulate messages by their base ID (assuming IDs are like "msg_123")
+  const latestEvent = saysEvents[saysEvents.length - 1];
+  const eventId = latestEvent._id;
   
-  if (lastProcessedResponseId.current === latest._id) {
+  // Get or create accumulated content for this event
+  const newContent = saysEvents
+    .map(e => e.content.trim())
+    .join(' ')
+    .replace(/\s+/g, ' ');
+  
+  // Only process if content has changed
+  if (accumulatedMessages[eventId] === newContent) {
     return;
   }
   
-  // Add a small delay to ensure message is complete
-  const timer = setTimeout(() => {
-    // Double-check content is still the same
-    const currentLatest = [...recentEvents]
-      .reverse()
-      .find((e) => e._kind === "interactionRequest" && e.action === "says");
+  // Update accumulated content
+  setAccumulatedMessages(prev => ({
+    ...prev,
+    [eventId]: newContent
+  }));
+  
+  // Check if the message looks complete
+  const isComplete = /[.!?]$/.test(newContent) || 
+                     newContent.length > 100 || 
+                     newContent.includes('?') ||
+                     newContent.includes('!');
+  
+  if (!isComplete) {
+    console.log("Waiting for more complete message:", newContent);
+    setLiveText(newContent); // Still show partial text
+    return; // Don't send to ElevenLabs yet
+  }
+  
+  // Only send to ElevenLabs when complete
+  if (lastProcessedResponseId.current !== eventId) {
+    console.log("Sending complete message to ElevenLabs:", newContent);
     
-    if (!currentLatest || currentLatest._id !== latest._id) {
-      return; // Message changed, abort
-    }
+    lastProcessedResponseId.current = eventId;
+    lastProcessedContent.current = newContent;
     
-    const finalContent = currentLatest.content.trim();
+    setLiveText(newContent);
     
-    if (lastProcessedContent.current === finalContent) {
-      return;
-    }
-    
-    console.log("Final content for ElevenLabs:", finalContent);
-    console.log("Length:", finalContent.length);
-    
-    lastProcessedResponseId.current = latest._id;
-    lastProcessedContent.current = finalContent;
-    
-    setLiveText(finalContent);
-    
-    if (!isMuted && finalContent) {
+    if (!isMuted && newContent) {
       const playAudio = async () => {
         const audioResult = await speakTextWithElevenLabs(
-          finalContent,
+          newContent,
           () => {
             pendingAudioRef.current = async () => {
               if (audioResult?.playAfterInteraction) {
@@ -316,10 +332,8 @@ useEffect(() => {
       
       playAudio();
     }
-  }, 600); // Wait 300ms for message to be complete
-  
-  return () => clearTimeout(timer);
-}, [recentEvents, isMuted]);
+  }
+}, [recentEvents, isMuted, accumulatedMessages]);
 
   // Measure overlay height
   useEffect(() => {
