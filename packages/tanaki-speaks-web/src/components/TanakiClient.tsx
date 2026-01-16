@@ -7,7 +7,7 @@ import { useProgress } from "@react-three/drei";
 import Lottie from "lottie-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
-import { ElevenLabs } from "elevenlabs"; // UPDATED: Removed 'play' import
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 
 // Import icons
 import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
@@ -16,9 +16,12 @@ import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
 const elevenLabsApiKey = '6ebf8d95b473254e4ee217995637b17b71f3e8e7481ef1a3a8d5b49dd4fbd504';
 // Use a FREE voice ID (Rachel)
 const elevenVoiceId = "JBFqnCBsd6RMkjVDRZzb";
-const elevenlabs = new ElevenLabs({ apiKey: elevenLabsApiKey });
+const elevenlabs = new ElevenLabsClient({
+  apiKey: elevenLabsApiKey,
+  timeout: 30000 // 30 seconds timeout
+});
 
-// ElevenLabs TTS Function - FIXED VERSION FOR BROWSER
+// ElevenLabs TTS Function
 async function speakTextWithElevenLabs(text: string) {
   if (!text.trim()) return null;
   
@@ -26,17 +29,17 @@ async function speakTextWithElevenLabs(text: string) {
     console.log("🎤 ElevenLabs TTS:", text);
     
     // Get audio stream from ElevenLabs
-    const audio = await elevenlabs.textToSpeech.convert(
+    const audioResponse = await elevenlabs.textToSpeech.convert(
       elevenVoiceId,
       {
         text: text,
-        modelId: 'eleven_multilingual_v2',
-        outputFormat: 'mp3_44100_128',
+        model_id: 'eleven_multilingual_v2',
+        output_format: 'mp3_44100_128',
       }
     );
 
-    // Convert to Blob and create Object URL
-    const audioBlob = new Blob([audio], { type: 'audio/mpeg' });
+    // Convert response to audio blob
+    const audioBlob = await audioResponse.blob();
     const audioUrl = URL.createObjectURL(audioBlob);
     
     // Create audio element
