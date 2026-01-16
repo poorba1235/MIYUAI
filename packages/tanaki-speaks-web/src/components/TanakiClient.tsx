@@ -20,69 +20,96 @@ const elevenlabs = new ElevenLabsClient({
 });
 
 // PRODUCTION-READY ElevenLabs TTS Function
+// Updated ElevenLabs TTS Function with streaming
 async function speakTextWithElevenLabs(text: string, onUserInteractionRequired?: () => void) {
   const textToSpeak = text.trim() || "Processing your request";
   
   if (!textToSpeak) return null;
   
   try {
-    // Get audio stream from ElevenLabs
-    const audioStream = await elevenlabs.textToSpeech.convert(
-      elevenVoiceId,
+    // Stream audio directly
+    const audioResponse = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${elevenVoiceId}/stream`,
       {
-        text: textToSpeak,
-        modelId: 'eleven_multilingual_v2',
-        outputFormat: 'mp3_44100_128',
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': elevenLabsApiKey,
+        },
+        body: JSON.stringify({
+          text: textToSpeak,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true
+          }
+        })
       }
     );
 
-    // Convert to blob and create audio
-    const audioBlob = await new Response(audioStream).blob();
+    if (!audioResponse.ok) {
+      console.error('ElevenLabs API error:', await audioResponse.text());
+      return null;
+    }
+
+    // Create audio element with streaming
+    const audioBlob = await audioResponse.blob();
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
+    
+    // Optimize audio settings
     audio.volume = 1.0;
+    audio.preload = 'auto';
     
-    // Cleanup function
     const cleanup = () => {
-      audio.pause();
-      URL.revokeObjectURL(audioUrl);
+      if (!audio.paused) {
+        audio.pause();
+      }
+      if (audio.src) {
+        URL.revokeObjectURL(audioUrl);
+      }
     };
-    
-    // Add event listeners for cleanup
-    audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
+
+    // Event listeners
+    audio.onended = cleanup;
+    audio.onerror = (e) => {
+      console.error('Audio playback error:', e);
+      cleanup();
     };
-    
-    audio.onerror = () => {
-      URL.revokeObjectURL(audioUrl);
-    };
-    
-    // Try to play
+
+    // Play immediately
     try {
       await audio.play();
-      return { stop: cleanup, audio };
+      return { 
+        stop: cleanup, 
+        audio,
+        isPlaying: true 
+      };
     } catch (playError: any) {
       if (playError.name === 'NotAllowedError' && onUserInteractionRequired) {
         onUserInteractionRequired();
         
-        // Return function to play after interaction
-        const playAfterInteraction = async () => {
-          try {
-            await audio.play();
-            return audio;
-          } catch {
-            cleanup();
-            return null;
+        return { 
+          stop: cleanup, 
+          audio, 
+          playAfterInteraction: async () => {
+            try {
+              await audio.play();
+              return audio;
+            } catch {
+              cleanup();
+              return null;
+            }
           }
         };
-        
-        return { stop: cleanup, audio, playAfterInteraction };
       }
-      
       cleanup();
       return null;
     }
-    
+
   } catch (err) {
     console.error("ElevenLabs TTS error:", err);
     return null;
@@ -262,22 +289,19 @@ useEffect(() => {
   
   const content = latest.content.trim();
   
-  // Check if we've already processed this exact response
+  // Only check ID, not content (allow same content to be spoken again)
   if (lastProcessedResponseId.current === latest._id) {
     return;
   }
   
-  // Check if we're already showing this content
-  if (lastProcessedContent.current === content) {
-    return;
-  }
-  
-  // Update trackers
+  // Update tracker immediately
   lastProcessedResponseId.current = latest._id;
   lastProcessedContent.current = content;
   
+  // Update UI immediately
   setLiveText(content);
   
+  // Start TTS immediately (if not muted)
   if (!isMuted && content) {
     const playAudio = async () => {
       const audioResult = await speakTextWithElevenLabs(
@@ -296,6 +320,7 @@ useEffect(() => {
       }
     };
     
+    // Don't wait for audio to finish loading before continuing
     playAudio();
   }
 }, [recentEvents, isMuted]);
