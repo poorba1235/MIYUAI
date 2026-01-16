@@ -14,112 +14,77 @@ import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
 
 // ElevenLabs Configuration
 const elevenLabsApiKey = '6ebf8d95b473254e4ee217995637b17b71f3e8e7481ef1a3a8d5b49dd4fbd504';
-// Use a FREE voice ID (Rachel)
 const elevenVoiceId = "JBFqnCBsd6RMkjVDRZzb";
 const elevenlabs = new ElevenLabsClient({
   apiKey: elevenLabsApiKey,
-  timeout: 30000 // 30 seconds timeout
 });
 
-// ElevenLabs TTS Function
-// ElevenLabs TTS Function - FIXED VERSION
-async function speakTextWithElevenLabs(text: string) {
-  if (!text.trim()) return null;
+// PRODUCTION-READY ElevenLabs TTS Function
+async function speakTextWithElevenLabs(text: string, onUserInteractionRequired?: () => void) {
+  const textToSpeak = text.trim() || "Processing your request";
+  
+  if (!textToSpeak) return null;
   
   try {
-    console.log("🎤 ElevenLabs TTS:", text);
-    
     // Get audio stream from ElevenLabs
-    const audioResponse = await elevenlabs.textToSpeech.convert(
+    const audioStream = await elevenlabs.textToSpeech.convert(
       elevenVoiceId,
       {
-        text: text,
+        text: textToSpeak,
         modelId: 'eleven_multilingual_v2',
         outputFormat: 'mp3_44100_128',
       }
     );
 
-    // The response might be an ArrayBuffer or ReadableStream
-    // Let's handle different response types
-    let audioBlob: Blob;
-    
-    if (audioResponse instanceof ArrayBuffer) {
-      audioBlob = new Blob([audioResponse], { type: 'audio/mpeg' });
-    } else if (audioResponse instanceof ReadableStream) {
-      // Convert ReadableStream to ArrayBuffer
-      const reader = audioResponse.getReader();
-      const chunks = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-      const arrayBuffer = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0));
-      let offset = 0;
-      for (const chunk of chunks) {
-        arrayBuffer.set(chunk, offset);
-        offset += chunk.length;
-      }
-      audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-    } else if (audioResponse instanceof Blob) {
-      audioBlob = audioResponse;
-    } else if (typeof audioResponse === 'string') {
-      // If it's a base64 string
-      const binaryString = atob(audioResponse);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
-    } else {
-      // Try to convert whatever it is to ArrayBuffer
-      try {
-        const arrayBuffer = await audioResponse.arrayBuffer?.();
-        if (arrayBuffer) {
-          audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-        } else {
-          throw new Error('Unknown response type');
-        }
-      } catch {
-        throw new Error('Unable to process audio response');
-      }
-    }
-
+    // Convert to blob and create audio
+    const audioBlob = await new Response(audioStream).blob();
     const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.volume = 1.0;
     
-    // Create audio element
-    const audioElement = new Audio(audioUrl);
-    
-    // Set up promise for playback
-    const playbackPromise = new Promise((resolve, reject) => {
-      audioElement.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        resolve(true);
-      };
-      audioElement.onerror = (error) => {
-        URL.revokeObjectURL(audioUrl);
-        reject(error);
-      };
-    });
-    
-    // Start playback
-    await audioElement.play();
-    
-    console.log("✅ ElevenLabs TTS playing...");
-    
-    return {
-      isPlaying: true,
-      stop: () => {
-        audioElement.pause();
-        URL.revokeObjectURL(audioUrl);
-      },
-      setVolume: (volume: number) => {
-        audioElement.volume = Math.max(0, Math.min(1, volume));
-      }
+    // Cleanup function
+    const cleanup = () => {
+      audio.pause();
+      URL.revokeObjectURL(audioUrl);
     };
     
+    // Add event listeners for cleanup
+    audio.onended = () => {
+      URL.revokeObjectURL(audioUrl);
+    };
+    
+    audio.onerror = () => {
+      URL.revokeObjectURL(audioUrl);
+    };
+    
+    // Try to play
+    try {
+      await audio.play();
+      return { stop: cleanup, audio };
+    } catch (playError: any) {
+      if (playError.name === 'NotAllowedError' && onUserInteractionRequired) {
+        onUserInteractionRequired();
+        
+        // Return function to play after interaction
+        const playAfterInteraction = async () => {
+          try {
+            await audio.play();
+            return audio;
+          } catch {
+            cleanup();
+            return null;
+          }
+        };
+        
+        return { stop: cleanup, audio, playAfterInteraction };
+      }
+      
+      cleanup();
+      return null;
+    }
+    
   } catch (err) {
-    console.error("❌ ElevenLabs TTS error:", err);
+    console.error("ElevenLabs TTS error:", err);
     return null;
   }
 }
@@ -168,14 +133,15 @@ function TanakiExperience() {
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [userMessages, setUserMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
+  
+  // Audio state
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const pendingAudioRef = useRef<(() => Promise<any>) | null>(null);
 
-  // Speech recognition state (for user input only)
+  // Speech recognition state
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
   const [interimTranscript, setInterimTranscript] = useState("");
   const [finalTranscript, setFinalTranscript] = useState("");
-
-  // Test ElevenLabs ONCE on mount
-  const hasTestedElevenLabsRef = useRef(false);
 
   // Update timestamp
   useEffect(() => {
@@ -183,24 +149,21 @@ function TanakiExperience() {
     return () => window.clearInterval(id);
   }, []);
 
-  // Initialize speech recognition (for user voice input)
+  // Initialize speech recognition
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.warn("Speech recognition not supported");
-      return;
-    }
+    if (!SpeechRecognition) return;
 
     const recognitionInstance = new SpeechRecognition();
     recognitionInstance.continuous = true;
     recognitionInstance.interimResults = true;
     recognitionInstance.lang = 'en-US';
 
-    recognitionInstance.onstart = () => {
-      setIsRecording(true);
-    };
+    recognitionInstance.onstart = () => setIsRecording(true);
+    recognitionInstance.onend = () => setIsRecording(false);
+    recognitionInstance.onerror = () => setIsRecording(false);
 
     recognitionInstance.onresult = (event) => {
       let interim = '';
@@ -222,15 +185,6 @@ function TanakiExperience() {
       }
     };
 
-    recognitionInstance.onerror = (event) => {
-      console.error("Speech recognition error:", event.error);
-      setIsRecording(false);
-    };
-
-    recognitionInstance.onend = () => {
-      setIsRecording(false);
-    };
-
     setRecognition(recognitionInstance);
 
     return () => {
@@ -240,7 +194,7 @@ function TanakiExperience() {
 
   const toggleVoiceRecording = () => {
     if (!recognition) {
-      alert("Speech recognition not supported. Use Chrome or Edge.");
+      alert("Speech recognition not supported in this browser.");
       return;
     }
 
@@ -272,58 +226,64 @@ function TanakiExperience() {
     return relevant.filter((e) => now - e._timestamp >= 0 && now - e._timestamp < baseDurationMs);
   }, [events, now]);
 
+  // Function to unlock audio context
+  const unlockAudioContext = useCallback(async () => {
+    if (audioUnlocked) return;
+    
+    try {
+      const silentAudio = new Audio();
+      silentAudio.volume = 0;
+      await silentAudio.play();
+      silentAudio.pause();
+      
+      setAudioUnlocked(true);
+      
+      // Play any pending audio
+      if (pendingAudioRef.current) {
+        await pendingAudioRef.current();
+        pendingAudioRef.current = null;
+      }
+      
+    } catch (error) {
+      // Silent fail for production
+    }
+  }, [audioUnlocked]);
+
   // When AI responds, use ElevenLabs TTS
   useEffect(() => {
     const latest = [...recentEvents]
       .reverse()
       .find((e) => e._kind === "interactionRequest" && e.action === "says");
     
-    if (!latest || !latest.content) return;
+    if (!latest) return;
     
-    // Prevent playing same message twice
-    if (liveText === latest.content) return;
+    const content = latest.content?.trim() || "Processing your request";
+    if (liveText === content) return;
     
-    setLiveText(latest.content);
+    setLiveText(content);
     
-    // Use ElevenLabs for TTS if not muted
-    if (!isMuted && latest.content.trim()) {
+    if (!isMuted && content) {
       const playAudio = async () => {
-        const audioPlayer = await speakTextWithElevenLabs(latest.content);
-        // You can store this audioPlayer reference if you need to control playback later
+        const audioResult = await speakTextWithElevenLabs(
+          content,
+          () => {
+            // Audio needs user interaction
+            pendingAudioRef.current = async () => {
+              if (audioResult?.playAfterInteraction) {
+                await audioResult.playAfterInteraction();
+              }
+            };
+          }
+        );
+        
+        if (audioResult?.playAfterInteraction) {
+          pendingAudioRef.current = audioResult.playAfterInteraction;
+        }
       };
+      
       playAudio();
     }
   }, [recentEvents, isMuted]);
-
-  // TEST ElevenLabs ONCE on component mount
-  useEffect(() => {
-    if (!isMuted && !hasTestedElevenLabsRef.current) {
-      console.log("🔊 Testing ElevenLabs TTS...");
-      
-      // Set flag immediately to prevent multiple calls
-      hasTestedElevenLabsRef.current = true;
-      
-      // Run test after a short delay
-      setTimeout(() => {
-        const runTest = async () => {
-          try {
-            console.log("🎤 Sending test to ElevenLabs...");
-            
-            // Use the same function
-            await speakTextWithElevenLabs(
-              'Neural interface initialized. Welcome to MIYU AI.'
-            );
-            
-            console.log("✅ ElevenLabs test successful!");
-          } catch (error) {
-            console.error("❌ ElevenLabs test failed:", error);
-          }
-        };
-        
-        runTest();
-      }, 2000); // Wait 2 seconds after load
-    }
-  }, [isMuted]);
 
   // Measure overlay height
   useEffect(() => {
@@ -377,9 +337,7 @@ function TanakiExperience() {
   }, [userMessages, now]);
 
   const toggleMute = () => {
-    const newMutedState = !isMuted;
-    setIsMuted(newMutedState);
-    console.log("Mute state:", newMutedState);
+    setIsMuted(!isMuted);
   };
 
   const { active, progress } = useProgress();
@@ -397,8 +355,15 @@ function TanakiExperience() {
   return (
     <div
       style={{ height: "100dvh", width: "100%", position: "relative" }}
-      onPointerDownCapture={unlockOnce}
-      onTouchStartCapture={unlockOnce}
+      onPointerDownCapture={(e) => {
+        unlockOnce();
+        unlockAudioContext();
+      }}
+      onTouchStartCapture={(e) => {
+        unlockOnce();
+        unlockAudioContext();
+      }}
+      onClick={unlockAudioContext}
     >
       <ModelLoadingOverlay active={active} progress={progress} />
 
