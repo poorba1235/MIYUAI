@@ -1,5 +1,5 @@
-app = "meilin"
-primary_region = "sin"
+app = "miyu"
+primary_region = "iad"
 
 [build]
 dockerfile = "Dockerfile"
