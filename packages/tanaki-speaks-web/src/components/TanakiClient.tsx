@@ -259,69 +259,108 @@ function TanakiExperience() {
 
 
 // Add this state
-const processingTimer = useRef<NodeJS.Timeout | null>(null);
-const lastSentContent = useRef<string>('');
+const [accumulatedMessages, setAccumulatedMessages] = useState<Record<string, string>>({});
 
+// Updated useEffect
 useEffect(() => {
-  // Get says events
+  // Get all recent "says" events
   const saysEvents = recentEvents
     .filter((e) => e._kind === "interactionRequest" && e.action === "says" && e.content)
-    .sort((a, b) => (a._timestamp || 0) - (b._timestamp || 0));
+    .sort((a, b) => (a._timestamp || 0) - (b._timestamp || 0)); // Oldest first
   
   if (saysEvents.length === 0) return;
   
-  // Build content
+  // Accumulate messages by their base ID (assuming IDs are like "msg_123")
+  const latestEvent = saysEvents[saysEvents.length - 1];
+  const eventId = latestEvent._id;
+  
+  // Get or create accumulated content for this event
   const newContent = saysEvents
-    .map(e => e.content?.trim() || '')
-    .filter(Boolean)
+    .map(e => e.content.trim())
     .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/\s+/g, ' ');
   
-  if (!newContent) return;
-  
-  // Update UI
-  setLiveText(newContent);
-  
-  // Clear previous timer
-  if (processingTimer.current) {
-    clearTimeout(processingTimer.current);
+  // Only process if content has changed
+  if (accumulatedMessages[eventId] === newContent) {
+    return;
   }
   
-  // Set new timer
-  processingTimer.current = setTimeout(() => {
-    // Don't send duplicates
-    if (lastSentContent.current === newContent) return;
-    
-    // SIMPLE RULES THAT ALWAYS WORK:
-    // 1. If it ends with punctuation → send
-    // 2. If it has punctuation anywhere and is > 5 chars → send
-    // 3. If it's > 15 chars (even without punctuation) → send
-    
-    const endsWithPunct = /[.!?]\s*$/.test(newContent);
-    const hasPunctAnywhere = /[.!?]/.test(newContent);
-    const isLongEnough = newContent.length > 15;
-    const hasPunctAndLength = hasPunctAnywhere && newContent.length > 5;
-    
-    const shouldSend = endsWithPunct || hasPunctAndLength || isLongEnough;
-    
-    if (shouldSend) {
-      lastSentContent.current = newContent;
-      
-      if (!isMuted) {
-        speakTextWithElevenLabs(newContent, () => {
-          // Callback if needed
-        });
-      }
-    }
-  }, 500);
+  // Update accumulated content
+  setAccumulatedMessages(prev => ({
+    ...prev,
+    [eventId]: newContent
+  }));
   
-  return () => {
-    if (processingTimer.current) {
-      clearTimeout(processingTimer.current);
+  // ENHANCED COMPLETION LOGIC:
+  // Check if the message looks complete
+  
+  // 1. Ends with punctuation (most reliable)
+  const endsWithPunctuation = /[.!?]\s*$/.test(newContent);
+  
+  // 2. Is very long (even without punctuation)
+  const isVeryLong = newContent.length > 120;
+  
+  // 3. Has punctuation AND is reasonably long (not just "Hi!" or "Hey again!")
+  // This prevents short mid-sentence punctuation from triggering too early
+  const hasPunctuationAndLength = /[.!?]/.test(newContent) && newContent.length > 25;
+  
+  // 4. Contains a question mark (but only if it's likely a complete question)
+  const hasQuestionMark = newContent.includes('?');
+  const isCompleteQuestion = hasQuestionMark && (endsWithPunctuation || newContent.length > 30);
+  
+  const isComplete = endsWithPunctuation || 
+                     isVeryLong || 
+                     hasPunctuationAndLength || 
+                     isCompleteQuestion;
+  
+  console.log("Completion check:", {
+    content: newContent,
+    length: newContent.length,
+    endsWithPunctuation,
+    isVeryLong,
+    hasPunctuationAndLength,
+    hasQuestionMark,
+    isCompleteQuestion,
+    isComplete
+  });
+  
+  if (!isComplete) {
+    console.log("Waiting for more complete message:", newContent);
+    setLiveText(newContent); // Still show partial text
+    return; // Don't send to ElevenLabs yet
+  }
+  
+  // Only send to ElevenLabs when complete
+  if (lastProcessedResponseId.current !== eventId) {
+    console.log("Sending complete message to ElevenLabs:", newContent);
+    
+    lastProcessedResponseId.current = eventId;
+    lastProcessedContent.current = newContent;
+    
+    setLiveText(newContent);
+    
+    if (!isMuted && newContent) {
+      const playAudio = async () => {
+        const audioResult = await speakTextWithElevenLabs(
+          newContent,
+          () => {
+            pendingAudioRef.current = async () => {
+              if (audioResult?.playAfterInteraction) {
+                await audioResult.playAfterInteraction();
+              }
+            };
+          }
+        );
+        
+        if (audioResult?.playAfterInteraction) {
+          pendingAudioRef.current = audioResult.playAfterInteraction;
+        }
+      };
+      
+      playAudio();
     }
-  };
-}, [recentEvents, isMuted]);
+  }
+}, [recentEvents, isMuted, accumulatedMessages]);
 
   // Measure overlay height
   useEffect(() => {
