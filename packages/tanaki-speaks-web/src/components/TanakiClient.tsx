@@ -13,8 +13,8 @@ import { Tanaki3DExperience } from "./3d/Tanaki3DExperience";
 import { Cpu, Home, Menu, Settings, Users, Zap } from "lucide-react";
 
 // ElevenLabs Configuration
-const elevenLabsApiKey = 'sk_acdb28243a5faa6bd728925552d34f64704a6e10eb430c5a';
-const elevenVoiceId = "ocZQ262SsZb9RIxcQBOj";
+const elevenLabsApiKey = '6ebf8d95b473254e4ee217995637b17b71f3e8e7481ef1a3a8d5b49dd4fbd504';
+const elevenVoiceId = "cgSgspJ2msm6clMCkdW9";
 const elevenlabs = new ElevenLabsClient({
   apiKey: elevenLabsApiKey,
 });
@@ -291,53 +291,15 @@ useEffect(() => {
     [eventId]: newContent
   }));
   
-  // ENHANCED COMPLETION LOGIC:
-  // Check if the message looks complete
+  // Set live text immediately
+  setLiveText(newContent);
   
-  // 1. Ends with punctuation (most reliable)
-  const endsWithPunctuation = /[.!?]\s*$/.test(newContent);
-  
-  // 2. Is very long (even without punctuation)
-  const isVeryLong = newContent.length > 180;
-  
-  // 3. Has punctuation AND is reasonably long (not just "Hi!" or "Hey again!")
-  // This prevents short mid-sentence punctuation from triggering too early
-  const hasPunctuationAndLength = /[.!?]/.test(newContent) && newContent.length > 25;
-  
-  // 4. Contains a question mark (but only if it's likely a complete question)
-  const hasQuestionMark = newContent.includes('?');
-  const isCompleteQuestion = hasQuestionMark && (endsWithPunctuation || newContent.length > 30);
-  
-  const isComplete = endsWithPunctuation || 
-                     isVeryLong || 
-                     hasPunctuationAndLength || 
-                     isCompleteQuestion;
-  
-  console.log("Completion check:", {
-    content: newContent,
-    length: newContent.length,
-    endsWithPunctuation,
-    isVeryLong,
-    hasPunctuationAndLength,
-    hasQuestionMark,
-    isCompleteQuestion,
-    isComplete
-  });
-  
-  if (!isComplete) {
-    console.log("Waiting for more complete message:", newContent);
-    setLiveText(newContent); // Still show partial text
-    return; // Don't send to ElevenLabs yet
-  }
-  
-  // Only send to ElevenLabs when complete
-  if (lastProcessedResponseId.current !== eventId) {
-    console.log("Sending complete message to ElevenLabs:", newContent);
+  // Send to ElevenLabs immediately
+  if (lastProcessedResponseId.current !== eventId && newContent) {
+    console.log("Sending to ElevenLabs:", newContent);
     
     lastProcessedResponseId.current = eventId;
     lastProcessedContent.current = newContent;
-    
-    setLiveText(newContent);
     
     if (!isMuted && newContent) {
       const playAudio = async () => {
