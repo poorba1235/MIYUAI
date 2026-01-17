@@ -19,11 +19,21 @@ const elevenlabs = new ElevenLabsClient({
   apiKey: elevenLabsApiKey,
 });
 
-// PRODUCTION-READY ElevenLabs TTS Function
+// FIXED: ElevenLabs TTS with proper audio management
+const currentAudioRefs = {
+  current: null as { stop: () => void; audio: HTMLAudioElement } | null
+};
+
 async function speakTextWithElevenLabs(text: string, onUserInteractionRequired?: () => void) {
   const textToSpeak = text;
   
   if (!textToSpeak) return null;
+  
+  // STOP any currently playing audio immediately
+  if (currentAudioRefs.current) {
+    currentAudioRefs.current.stop();
+    currentAudioRefs.current = null;
+  }
   
   try {
     // Get audio stream from ElevenLabs
@@ -34,10 +44,10 @@ async function speakTextWithElevenLabs(text: string, onUserInteractionRequired?:
         modelId: 'eleven_multilingual_v2',
         outputFormat: 'mp3_44100_128',
         voiceSettings: {
-        stability: 0.7,
-        similarityBoost: 0.8,
-       },
-        optimizeStreamingLatency: 3, // Add this line
+          stability: 0.7,
+          similarityBoost: 0.8,
+        },
+        optimizeStreamingLatency: 3,
       }
     );
 
@@ -50,17 +60,19 @@ async function speakTextWithElevenLabs(text: string, onUserInteractionRequired?:
     // Cleanup function
     const cleanup = () => {
       audio.pause();
+      audio.currentTime = 0;
       URL.revokeObjectURL(audioUrl);
+      if (currentAudioRefs.current?.audio === audio) {
+        currentAudioRefs.current = null;
+      }
     };
     
     // Add event listeners for cleanup
-    audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
-    };
+    audio.onended = cleanup;
+    audio.onerror = cleanup;
     
-    audio.onerror = () => {
-      URL.revokeObjectURL(audioUrl);
-    };
+    // Store reference for later stopping
+    currentAudioRefs.current = { stop: cleanup, audio };
     
     // Try to play
     try {
@@ -91,6 +103,14 @@ async function speakTextWithElevenLabs(text: string, onUserInteractionRequired?:
   } catch (err) {
     console.error("ElevenLabs TTS error:", err);
     return null;
+  }
+}
+
+// FIXED: Stop all audio function
+function stopAllAudio() {
+  if (currentAudioRefs.current) {
+    currentAudioRefs.current.stop();
+    currentAudioRefs.current = null;
   }
 }
 
@@ -138,9 +158,13 @@ function TanakiExperience() {
   const [isRecording, setIsRecording] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [userMessages, setUserMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
-    // When AI responds, use ElevenLabs TTS
+  
+  // TTS state - FIXED: Track processing state
   const lastProcessedResponseId = useRef<string | null>(null);
-  const lastProcessedContent = useRef<string | null>(null);
+  const currentSpeakingRef = useRef<{
+    id: string;
+    content: string;
+  } | null>(null);
 
   // Audio state
   const [audioUnlocked, setAudioUnlocked] = useState(false);
@@ -221,9 +245,10 @@ function TanakiExperience() {
     unlockedOnceRef.current = true;
   }, []);
 
-  // Filter events
+  // FIXED: Filter events - use shorter duration for chat
   const recentEvents = useMemo(() => {
-    const baseDurationMs = 10000;
+    const chatDurationMs = 5000; // Short for chat display
+    const ttsDurationMs = 30000; // Longer for TTS processing
     
     const relevant = events.filter((e) => {
       if (e._kind === "perception") return !e.internal && e.action === "said";
@@ -231,7 +256,7 @@ function TanakiExperience() {
       return false;
     });
 
-    return relevant.filter((e) => now - e._timestamp >= 0 && now - e._timestamp < baseDurationMs);
+    return relevant.filter((e) => now - e._timestamp >= 0 && now - e._timestamp < chatDurationMs);
   }, [events, now]);
 
   // Function to unlock audio context
@@ -257,92 +282,76 @@ function TanakiExperience() {
     }
   }, [audioUnlocked]);
 
-
-// Add this state
-const [accumulatedMessages, setAccumulatedMessages] = useState<Record<string, string>>({});
-
-// Updated useEffect
-useEffect(() => {
-  // Get all recent "says" events
-  const saysEvents = recentEvents
-    .filter((e) => e._kind === "interactionRequest" && e.action === "says" && e.content)
-    .sort((a, b) => (a._timestamp || 0) - (b._timestamp || 0)); // Oldest first
+  // FIXED: Main TTS processing effect
+  useEffect(() => {
+    // Get ALL "says" events from the last 30 seconds for TTS
+    const ttsEvents = events
+      .filter((e) => e._kind === "interactionRequest" && e.action === "says" && e.content)
+      .filter((e) => now - e._timestamp >= 0 && now - e._timestamp < 30000) // 30 seconds for TTS
+      .sort((a, b) => (a._timestamp || 0) - (b._timestamp || 0)); // Oldest first
   
-  if (saysEvents.length === 0) return;
-  
-  // Accumulate messages by their base ID (assuming IDs are like "msg_123")
-  const latestEvent = saysEvents[saysEvents.length - 1];
-  const eventId = latestEvent._id;
-  
-  // Get or create accumulated content for this event
-  const newContent = saysEvents
-    .map(e => e.content.trim())
-    .join(' ')
-    .replace(/\s+/g, ' ');
-  
-  // Only process if content has changed
-  if (accumulatedMessages[eventId] === newContent) {
-    return;
-  }
-  
-  // Update accumulated content
-  setAccumulatedMessages(prev => ({
-    ...prev,
-    [eventId]: newContent
-  }));
-  
-  // ENHANCED COMPLETION LOGIC:
-  // Check if the message looks complete
-  
-  // 1. Ends with punctuation (most reliable)
-  const endsWithPunctuation = /[.!?]\s*$/.test(newContent);
-  
-  // 2. Is very long (even without punctuation)
-  const isVeryLong = newContent.length > 120;
-  
-  // 3. Has punctuation AND is reasonably long (not just "Hi!" or "Hey again!")
-  // This prevents short mid-sentence punctuation from triggering too early
-  const hasPunctuationAndLength = /[.!?]/.test(newContent) && newContent.length > 25;
-  
-  // 4. Contains a question mark (but only if it's likely a complete question)
-  const hasQuestionMark = newContent.includes('?');
-  const isCompleteQuestion = hasQuestionMark && (endsWithPunctuation || newContent.length > 30);
-  
-  const isComplete = endsWithPunctuation || 
-                     isVeryLong || 
-                     hasPunctuationAndLength || 
-                     isCompleteQuestion;
-  
-  console.log("Completion check:", {
-    content: newContent,
-    length: newContent.length,
-    endsWithPunctuation,
-    isVeryLong,
-    hasPunctuationAndLength,
-    hasQuestionMark,
-    isCompleteQuestion,
-    isComplete
-  });
-  
-  if (!isComplete) {
-    console.log("Waiting for more complete message:", newContent);
-    setLiveText(newContent); // Still show partial text
-    return; // Don't send to ElevenLabs yet
-  }
-  
-  // Only send to ElevenLabs when complete
-  if (lastProcessedResponseId.current !== eventId) {
-    console.log("Sending complete message to ElevenLabs:", newContent);
+    if (ttsEvents.length === 0) return;
     
-    lastProcessedResponseId.current = eventId;
-    lastProcessedContent.current = newContent;
+    // Group events by conversation ID or get the latest complete response
+    // Find the latest completed response
+    let latestCompleteEvent = null;
+    let accumulatedText = "";
     
-    setLiveText(newContent);
+    // Work backwards from newest to find complete responses
+    for (let i = ttsEvents.length - 1; i >= 0; i--) {
+      const event = ttsEvents[i];
+      accumulatedText = event.content + (accumulatedText ? " " + accumulatedText : "");
+      
+      // Check if this looks like a complete response
+      const endsWithPunctuation = /[.!?]\s*$/.test(event.content);
+      const isComplete = endsWithPunctuation || event.content.length > 80;
+      
+      if (isComplete) {
+        latestCompleteEvent = {
+          id: event._id,
+          content: accumulatedText.trim()
+        };
+        break;
+      }
+    }
     
-    if (!isMuted && newContent) {
+    // If no complete response found, use the latest text
+    if (!latestCompleteEvent && ttsEvents.length > 0) {
+      const latestEvent = ttsEvents[ttsEvents.length - 1];
+      latestCompleteEvent = {
+        id: latestEvent._id,
+        content: latestEvent.content.trim()
+      };
+    }
+    
+    if (!latestCompleteEvent) return;
+    
+    // FIXED: Only process if this is a NEW response
+    if (currentSpeakingRef.current?.id === latestCompleteEvent.id) {
+      // Already speaking this response
+      setLiveText(latestCompleteEvent.content);
+      return;
+    }
+    
+    // FIXED: Stop any current audio and process new response
+    stopAllAudio();
+    
+    console.log("Processing new TTS response:", {
+      id: latestCompleteEvent.id,
+      content: latestCompleteEvent.content.substring(0, 100) + "...",
+      length: latestCompleteEvent.content.length
+    });
+    
+    // Update state
+    currentSpeakingRef.current = latestCompleteEvent;
+    lastProcessedResponseId.current = latestCompleteEvent.id;
+    setLiveText(latestCompleteEvent.content);
+    
+    // Speak the text if not muted
+    if (!isMuted && latestCompleteEvent.content) {
       const playAudio = async () => {
         const audioResult = await speakTextWithElevenLabs(
-          newContent,
+          latestCompleteEvent.content,
           () => {
             pendingAudioRef.current = async () => {
               if (audioResult?.playAfterInteraction) {
@@ -359,8 +368,7 @@ useEffect(() => {
       
       playAudio();
     }
-  }
-}, [recentEvents, isMuted, accumulatedMessages]);
+  }, [events, now, isMuted]); // Removed accumulatedMessages dependency
   
   // Measure overlay height
   useEffect(() => {
@@ -385,6 +393,9 @@ useEffect(() => {
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !connected) return;
     
+    // FIXED: Stop current audio when user sends new message
+    stopAllAudio();
+    
     const userMessage = {
       id: `user_${Date.now()}`,
       text: text,
@@ -407,7 +418,7 @@ useEffect(() => {
   };
 
   const recentUserMessages = useMemo(() => {
-    const baseDurationMs = 5000;
+    const baseDurationMs = 5000; // Match chat display duration
     return userMessages.filter(msg => 
       now - msg.timestamp.getTime() >= 0 && now - msg.timestamp.getTime() < baseDurationMs
     );
@@ -415,6 +426,10 @@ useEffect(() => {
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
+    if (!isMuted) {
+      // If muting, stop current audio
+      stopAllAudio();
+    }
   };
 
   const { active, progress } = useProgress();
