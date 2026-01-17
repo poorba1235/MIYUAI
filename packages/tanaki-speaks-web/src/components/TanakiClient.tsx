@@ -291,15 +291,59 @@ useEffect(() => {
     [eventId]: newContent
   }));
   
-  // Set live text immediately
-  setLiveText(newContent);
+  // ENHANCED COMPLETION LOGIC:
+  // Check if the message looks complete
   
-  // Send to ElevenLabs immediately
-  if (lastProcessedResponseId.current !== eventId && newContent) {
-    console.log("Sending to ElevenLabs:", newContent);
+  // 1. Ends with sentence-ending punctuation
+  const endsWithSentencePunctuation = /[.!?]\s*$/.test(newContent);
+  
+  // 2. Is very long (even without punctuation)
+  const isVeryLong = newContent.length > 120; // Reduced from 180
+  
+  // 3. Has punctuation AND is reasonably long (include commas in punctuation check)
+  const hasPunctuationAndLength = /[.!?,]/.test(newContent) && newContent.length > 25;
+  
+  // 4. Contains a question mark (but only if it's likely a complete question)
+  const hasQuestionMark = newContent.includes('?');
+  const isCompleteQuestion = hasQuestionMark && (endsWithSentencePunctuation || newContent.length > 30);
+  
+  // 5. Check for trailing continuation words that indicate incomplete thoughts
+  const hasTrailingContinuation = /\b(which|that|and|but|however|although|because|so|then)\s*$/i.test(newContent);
+  const isIncompleteDueToContinuation = hasTrailingContinuation && !endsWithSentencePunctuation;
+  
+  const isComplete = (endsWithSentencePunctuation || 
+                     isVeryLong || 
+                     hasPunctuationAndLength || 
+                     isCompleteQuestion) &&
+                     !isIncompleteDueToContinuation;
+  
+  console.log("Completion check:", {
+    content: newContent,
+    length: newContent.length,
+    endsWithSentencePunctuation,
+    isVeryLong,
+    hasPunctuationAndLength,
+    hasQuestionMark,
+    isCompleteQuestion,
+    hasTrailingContinuation,
+    isIncompleteDueToContinuation,
+    isComplete
+  });
+  
+  if (!isComplete) {
+    console.log("Waiting for more complete message:", newContent);
+    setLiveText(newContent); // Still show partial text
+    return; // Don't send to ElevenLabs yet
+  }
+  
+  // Only send to ElevenLabs when complete
+  if (lastProcessedResponseId.current !== eventId) {
+    console.log("Sending complete message to ElevenLabs:", newContent);
     
     lastProcessedResponseId.current = eventId;
     lastProcessedContent.current = newContent;
+    
+    setLiveText(newContent);
     
     if (!isMuted && newContent) {
       const playAudio = async () => {
@@ -323,7 +367,6 @@ useEffect(() => {
     }
   }
 }, [recentEvents, isMuted, accumulatedMessages]);
-
   // Measure overlay height
   useEffect(() => {
     const el = overlayRef.current;
