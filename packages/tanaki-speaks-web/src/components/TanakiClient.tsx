@@ -407,7 +407,7 @@ useEffect(() => {
   };
 
   const recentUserMessages = useMemo(() => {
-    const baseDurationMs = 10000;
+    const baseDurationMs = 5000;
     return userMessages.filter(msg => 
       now - msg.timestamp.getTime() >= 0 && now - msg.timestamp.getTime() < baseDurationMs
     );
