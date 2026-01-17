@@ -223,7 +223,7 @@ function TanakiExperience() {
 
   // Filter events
   const recentEvents = useMemo(() => {
-    const baseDurationMs = 13000;
+    const baseDurationMs = 14000;
     
     const relevant = events.filter((e) => {
       if (e._kind === "perception") return !e.internal && e.action === "said";
@@ -298,7 +298,7 @@ useEffect(() => {
   const endsWithPunctuation = /[.!?]\s*$/.test(newContent);
   
   // 2. Is very long (even without punctuation)
-  const isVeryLong = newContent.length > 120;
+  const isVeryLong = newContent.length > 180;
   
   // 3. Has punctuation AND is reasonably long (not just "Hi!" or "Hey again!")
   // This prevents short mid-sentence punctuation from triggering too early
