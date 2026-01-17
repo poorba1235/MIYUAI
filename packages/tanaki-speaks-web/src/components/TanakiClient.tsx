@@ -261,7 +261,7 @@ function TanakiExperience() {
 // Add this state
 const [accumulatedMessages, setAccumulatedMessages] = useState<Record<string, string>>({});
 
-// Updated useEffect - SIMPLIFIED VERSION
+// Updated useEffect
 useEffect(() => {
   // Get all recent "says" events
   const saysEvents = recentEvents
@@ -291,15 +291,53 @@ useEffect(() => {
     [eventId]: newContent
   }));
   
-  // Set live text immediately
-  setLiveText(newContent);
+  // ENHANCED COMPLETION LOGIC:
+  // Check if the message looks complete
   
-  // Send to ElevenLabs immediately without any completion checks
-  if (lastProcessedResponseId.current !== eventId && newContent) {
-    console.log("SENDING TO ELEVENLABS:", newContent);
+  // 1. Ends with punctuation (most reliable)
+  const endsWithPunctuation = /[.!?]\s*$/.test(newContent);
+  
+  // 2. Is very long (even without punctuation)
+  const isVeryLong = newContent.length > 120;
+  
+  // 3. Has punctuation AND is reasonably long (not just "Hi!" or "Hey again!")
+  // This prevents short mid-sentence punctuation from triggering too early
+  const hasPunctuationAndLength = /[.!?]/.test(newContent) && newContent.length > 25;
+  
+  // 4. Contains a question mark (but only if it's likely a complete question)
+  const hasQuestionMark = newContent.includes('?');
+  const isCompleteQuestion = hasQuestionMark && (endsWithPunctuation || newContent.length > 30);
+  
+  const isComplete = endsWithPunctuation || 
+                     isVeryLong || 
+                     hasPunctuationAndLength || 
+                     isCompleteQuestion;
+  
+  console.log("Completion check:", {
+    content: newContent,
+    length: newContent.length,
+    endsWithPunctuation,
+    isVeryLong,
+    hasPunctuationAndLength,
+    hasQuestionMark,
+    isCompleteQuestion,
+    isComplete
+  });
+  
+  if (!isComplete) {
+    console.log("Waiting for more complete message:", newContent);
+    setLiveText(newContent); // Still show partial text
+    return; // Don't send to ElevenLabs yet
+  }
+  
+  // Only send to ElevenLabs when complete
+  if (lastProcessedResponseId.current !== eventId) {
+    console.log("Sending complete message to ElevenLabs:", newContent);
     
     lastProcessedResponseId.current = eventId;
     lastProcessedContent.current = newContent;
+    
+    setLiveText(newContent);
     
     if (!isMuted && newContent) {
       const playAudio = async () => {
