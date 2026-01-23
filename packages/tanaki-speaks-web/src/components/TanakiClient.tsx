@@ -491,7 +491,6 @@ function TanakiExperience() {
     return allMessages.sort((a, b) => a.timestamp - b.timestamp);
   }, [recentUserMessages, recentEvents]);
 
-
   return (
     <div
       style={{ height: "100dvh", width: "100%", position: "relative" }}
@@ -654,7 +653,7 @@ function TanakiExperience() {
             </div>
           </div>
 
-          {/* Chat Messages - FIXED VERSION */}
+          {/* Chat Messages */}
           <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-black/10 border border-cyan-500/10 shadow-inner mt-3 chat-messages">
             {chatMessages.length === 0 ? (
               <div className="text-center py-8 text-cyan-300/50">
