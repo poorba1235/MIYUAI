@@ -628,7 +628,7 @@ function TanakiExperience() {
               </div>
               <div className="w-px h-4 bg-cyan-500/40"></div>
               <span className="text-cyan-200/80 text-xs font-medium">
-                {connectedUsers} {connectedUsers === 1 ? "user" : "users"} online
+                online
               </span>
               <div className="w-px h-4 bg-cyan-500/40"></div>
               <span className="text-cyan-200/80 text-xs font-medium">
