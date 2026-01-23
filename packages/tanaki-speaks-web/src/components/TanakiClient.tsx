@@ -299,7 +299,20 @@ function TanakiExperience() {
   }, [audioUnlocked]);
 
   // FIXED: Main TTS processing effect
+// Add this ref:
+const lastTtsProcessTimeRef = useRef<number>(0);
+
+// Modify the TTS useEffect to add debouncing:
+
+  // FIXED: Main TTS processing effect WITH DEBOUNCING
   useEffect(() => {
+    // DEBOUNCE: Only process every 500ms to prevent rapid runs
+    const currentTime = Date.now();
+    if (currentTime - lastTtsProcessTimeRef.current < 500) {
+      return;
+    }
+    lastTtsProcessTimeRef.current = currentTime;
+
     // Get ALL "says" events from the last 30 seconds for TTS
     const ttsEvents = events
       .filter((e) => e._kind === "interactionRequest" && e.action === "says" && e.content)
@@ -308,8 +321,8 @@ function TanakiExperience() {
   
     if (ttsEvents.length === 0) return;
     
-    // Log for debugging
-    console.log("TTS Events to process:", ttsEvents.length, ttsEvents);
+    // Log for debugging - LIMITED
+    console.log("TTS Events count:", ttsEvents.length);
     
     // Group events by conversation ID or get the latest complete response
     // Find the latest completed response
@@ -387,7 +400,7 @@ function TanakiExperience() {
       
       playAudio();
     }
-  }, [events, now, isMuted]); // Removed accumulatedMessages dependency
+  }, [events, now, isMuted]); // Keep all dependencies
   
   // Measure overlay height
   useEffect(() => {
