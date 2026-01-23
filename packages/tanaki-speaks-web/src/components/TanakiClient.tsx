@@ -249,20 +249,22 @@ function TanakiExperience() {
   }, []);
 
   // FIXED: Get ALL recent events properly
+  // FIXED: Get ALL recent events properly
   const recentEvents = useMemo(() => {
     const chatDurationMs = 60000; // 60 seconds for chat display
     
+    // REMOVE OR COMMENT OUT THESE LOGS:
     // Log all events for debugging
-    if (events.length > 0) {
-      console.log("All events:", events);
-      const saysEvents = events.filter(e => 
-        e._kind === "interactionRequest" && e.action === "says"
-      );
-      if (saysEvents.length > 0) {
-        console.log("Says events found:", saysEvents);
-        console.log("First says event content:", saysEvents[0]?.content);
-      }
-    }
+    // if (events.length > 0) {
+    //   console.log("All events:", events);
+    //   const saysEvents = events.filter(e => 
+    //     e._kind === "interactionRequest" && e.action === "says"
+    //   );
+    //   if (saysEvents.length > 0) {
+    //     console.log("Says events found:", saysEvents);
+    //     console.log("First says event content:", saysEvents[0]?.content);
+    //   }
+    // }
     
     // Filter for recent events
     const relevant = events.filter((e) => {
